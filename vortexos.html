@@ -1,0 +1,4138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1026" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Vortex OS</title>
+
+  <style>
+    :root{
+      --t-long: 640ms;
+      --t-fast: 160ms;
+      --t-mid: 320ms;
+      --t-boot: 900ms;
+
+      --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+      --ease-pop: cubic-bezier(0.16, 1, 0.3, 1);
+
+      --bg0: #070a16;
+      --bg1: #0b1026;
+
+      --surface: rgba(10, 14, 34, 0.82);
+      --surface2: rgba(10, 14, 34, 0.62);
+      --stroke: rgba(255,255,255,0.08);
+
+      --text: rgba(250, 252, 255, 0.95);
+      --muted: rgba(175, 190, 235, 0.78);
+
+      --accent: #2D8CFF;
+      --accent2: #00B8FF;
+      --accent-rgb: 45,140,255;
+      --danger: #ff4a6a;
+
+      --shadow: 0 24px 70px rgba(0,0,0,0.55);
+      --shadow2: 0 16px 40px rgba(0,0,0,0.42);
+
+      --radius-xl: 28px;
+      --radius-lg: 18px;
+      --radius-md: 12px;
+      --radius-sm: 10px;
+
+      --status-h: 46px;
+      --taskbar-h: 62px;
+      --dock-h: 72px;
+
+      --titlebar-h: 36px;
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #050714;
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }
+
+    #root {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(1200px 900px at 12% 10%, rgba(45,140,255,0.30), transparent 60%),
+                  radial-gradient(1000px 700px at 86% 85%, rgba(196,113,237,0.30), transparent 58%),
+                  radial-gradient(1200px 900px at 20% 90%, rgba(79,148,255,0.22), transparent 60%),
+                  linear-gradient(180deg, #050714, #070a16 45%, #040615);
+      background-size: 100% 100%;
+    }
+
+    .screen{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+
+      opacity:0;
+      visibility:hidden;
+      pointer-events:none;
+      transform: translateY(12px);
+      transition:
+        opacity var(--t-mid) var(--ease),
+        transform var(--t-mid) var(--ease),
+        visibility 0s linear var(--t-mid);
+    }
+    .screen.active{
+      opacity:1;
+      visibility:visible;
+      pointer-events:auto;
+      transform: translateY(0);
+      transition:
+        opacity var(--t-mid) var(--ease),
+        transform var(--t-mid) var(--ease),
+        visibility 0s;
+    }
+
+    .panel{
+      width:min(560px, 100%);
+      background: linear-gradient(135deg, rgba(10,14,34,0.92), rgba(10,14,34,0.62));
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(26px);
+      padding: 22px 18px 18px;
+
+      will-change: transform, opacity;
+      transform: translateY(14px) scale(0.99);
+      transition: transform var(--t-long) var(--ease-pop);
+    }
+    .screen.active .panel{
+      transform: translateY(0) scale(1);
+    }
+
+    .panelHead { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 42px; height: 42px;
+      border-radius: 16px;
+      background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.95), rgba(var(--accent-rgb),0.92));
+      box-shadow: 0 18px 46px rgba(var(--accent-rgb),0.55);
+      display: grid; place-items: center;
+      color: #0b1026;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      user-select: none;
+    }
+    .title { font-size: 18px; font-weight: 650; }
+    .subtitle { margin-top: 2px; font-size: 13px; color: var(--muted); }
+
+    .hint { margin-top: 12px; font-size: 12px; color: var(--muted); line-height: 1.45; }
+
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .row.end { justify-content: flex-end; }
+    .row.between { justify-content: space-between; }
+
+    .field { margin-top: 14px; }
+    label { display:block; font-size: 12px; color: var(--muted); margin-bottom: 7px; }
+    input[type="password"], input[type="text"], textarea, select {
+      width: 100%;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(6, 8, 22, 0.85);
+      color: var(--text);
+      padding: 10px 14px;
+      outline: none;
+      transition: box-shadow var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+      font-size: 14px;
+    }
+    textarea {
+      border-radius: 14px;
+      min-height: 160px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      padding: 12px 14px;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: rgba(var(--accent-rgb), 0.92);
+      box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.55);
+      background: rgba(6, 8, 22, 0.92);
+    }
+
+    .error {
+      margin-top: 8px;
+      font-size: 12px;
+      color: rgba(255, 145, 168, 0.95);
+      display: none;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: transform var(--t-fast), box-shadow var(--t-fast), background var(--t-fast), opacity var(--t-fast);
+      user-select: none;
+      color: var(--text);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      backdrop-filter: blur(14px);
+    }
+    .btn:not(.btnPrimary):hover { transform: translateY(-2px); background: rgba(255,255,255,0.09); }
+
+    .btnPrimary:hover{
+      transform: translateY(-2px);
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+    }
+
+    .btn:active { transform: translateY(0); opacity: 0.92; }
+
+    .btnPrimary {
+      color: #08102a;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none;
+      box-shadow: 0 16px 42px rgba(var(--accent-rgb), 0.45);
+    }
+    .btnPrimary:hover { box-shadow: 0 20px 56px rgba(var(--accent-rgb), 0.62); }
+
+    .btnGhost {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--muted);
+    }
+    .btnGhost:hover { background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.06); color: var(--text); }
+
+    .pill {
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--muted);
+      font-size: 11px;
+      user-select: none;
+    }
+
+    /* OS shell */
+    #os {
+      position: absolute;
+      inset: 0;
+      display: none;
+      padding: env(safe-area-inset-top, 10px) env(safe-area-inset-right, 10px) env(safe-area-inset-bottom, 10px) env(safe-area-inset-left, 10px);
+    }
+    #os.active { display: block; }
+
+    #bootOverlay{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:
+        radial-gradient(1200px 900px at 12% 10%, rgba(var(--accent-rgb),0.20), transparent 60%),
+        linear-gradient(180deg, rgba(4,6,18,0.98), rgba(4,6,18,0.92));
+      z-index:9999;
+
+      opacity:0;
+      visibility:hidden;
+      pointer-events:none;
+      transform: scale(1.02);
+      filter: blur(10px);
+
+      transition:
+        opacity var(--t-boot) var(--ease),
+        transform var(--t-boot) var(--ease),
+        filter var(--t-boot) var(--ease),
+        visibility 0s linear var(--t-boot);
+
+      will-change: transform, opacity, filter;
+    }
+    #bootOverlay.active{
+      opacity:1;
+      visibility:visible;
+      pointer-events:auto;
+      transform: scale(1);
+      filter: blur(0);
+
+      transition:
+        opacity var(--t-boot) var(--ease),
+        transform var(--t-boot) var(--ease),
+        filter var(--t-boot) var(--ease),
+        visibility 0s;
+    }
+
+    .bootCard{
+      width: min(520px, 92vw);
+      border-radius: var(--radius-xl);
+      background: linear-gradient(135deg, rgba(10,14,34,0.75), rgba(10,14,34,0.45));
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(28px);
+      padding: 18px 18px 16px;
+    }
+    .bootLine { display:flex; align-items:center; gap: 12px; }
+    .bootGlow {
+      width: 46px; height: 46px;
+      border-radius: 18px;
+      background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.95), rgba(var(--accent-rgb),0.92));
+      box-shadow: 0 18px 46px rgba(var(--accent-rgb),0.55);
+    }
+    .bootTitle { font-size: 16px; font-weight: 700; }
+    .bootSub { margin-top: 2px; font-size: 12px; color: var(--muted); }
+
+    /* Status bar */
+    #statusBar {
+      height: var(--status-h);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-radius: 999px;
+      padding: 0 14px;
+      background: linear-gradient(90deg, rgba(10,14,34,0.88), rgba(10,14,34,0.60));
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: var(--shadow2);
+      backdrop-filter: blur(26px);
+    }
+    .statusLeft, .statusCenter, .statusRight { display:flex; align-items:center; gap: 10px; }
+    .statusCenter { flex: 1; justify-content:center; color: var(--muted); font-size: 13px; }
+    .clockText { font-variant-numeric: tabular-nums; font-weight: 650; letter-spacing: 0.02em; }
+    .clockPart{ cursor: pointer; }
+    .clockPart:focus{ outline: none; }
+
+    .profileChip {
+      display:flex; align-items:center; gap: 8px;
+
+      height: 38px;          /* match .taskSearch */
+      padding: 0 12px;       /* vertically centered, same feel as search */
+
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      cursor: pointer;
+      transition: transform var(--t-fast), background var(--t-fast);
+    }
+    .profileChip:hover { transform: translateY(-1px); background: rgba(255,255,255,0.08); }
+    .avatar {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      overflow: hidden;
+      background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.95), rgba(123,92,255,0.9));
+      flex: 0 0 auto;
+    }
+    .avatar img { width:100%; height:100%; object-fit:cover; display:none; }
+    .profileName {
+      max-width: 160px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+      font-size: 12px;
+      color: rgba(240,245,255,0.9);
+    }
+
+    /* Main area */
+    #main {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    #desktopFrame {
+      position: relative;
+      flex: 1;
+      border-radius: 0;
+      border-bottom: none;
+      background: radial-gradient(1200px 900px at 0% 0%, rgba(255,255,255,0.06), rgba(6,8,22,0.92));
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(22px);
+    }
+
+    #windowsLayer {
+      position: absolute;
+      inset: 12px 12px 12px 12px;
+      overflow: visible;
+    }
+
+    /* Desktop taskbar */
+    #taskbar {
+      height: var(--taskbar-h);
+      border-radius: 0;
+      background: linear-gradient(90deg, rgba(var(--accent-rgb),0.16), rgba(10,14,34,0.68));
+      border: 1px solid rgba(255,255,255,0.06);
+      border-top: 1px solid rgba(255,255,255,0.10);
+      box-shadow: var(--shadow2);
+      backdrop-filter: blur(26px);
+      padding: 0 14px;
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .dockCenter { display:flex; align-items:center; gap: 8px; flex: 1; justify-content:center; }
+    .dockLeft, .dockRight { display:flex; align-items:center; gap: 8px; }
+
+    .appIcon {
+      width: 34px; height: 34px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 14px 34px rgba(0,0,0,0.45);
+      display:grid;
+      place-items:center;
+      cursor:pointer;
+      transition: transform var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+      position: relative;
+      user-select: none;
+    }
+    .appIcon:hover { transform: translateY(-3px); background: rgba(255,255,255,0.14); box-shadow: 0 18px 44px rgba(0,0,0,0.54); }
+    .appIconText { font-weight: 800; font-size: 14px; }
+    .appIcon.active::after{
+      content:"";
+      position:absolute;
+      bottom: 2px;
+      width: 12px;
+      height: 3px;
+      border-radius: 999px;
+      background: rgba(var(--accent-rgb), 0.95);
+      box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.70);
+    }
+    .appIcon.focused{
+      outline: 1px solid rgba(var(--accent-rgb), 0.35);
+      box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12), 0 18px 44px rgba(0,0,0,0.54);
+    }
+
+    /* Windows */
+    .win{
+      position:absolute;
+      width: 556px;
+      height: 340px;
+      max-width: calc(100% - 3px);
+      max-height: calc(100% - 3px);
+
+      border-radius: 18px;
+      overflow:hidden;
+      background:
+        linear-gradient(135deg, rgba(var(--accent-rgb),0.14), rgba(0,0,0,0.25)),
+        rgba(7,10,24,0.96);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(24px);
+
+      opacity:0;
+      transform: translateY(14px) scale(0.985);
+      filter: blur(8px);
+      pointer-events:none;
+
+      transition:
+        opacity var(--t-mid) var(--ease),
+        transform var(--t-mid) var(--ease),
+        filter var(--t-mid) var(--ease),
+        left var(--t-mid) var(--ease),
+        top var(--t-mid) var(--ease),
+        width var(--t-mid) var(--ease),
+        height var(--t-mid) var(--ease);
+
+      will-change: transform, opacity, filter;
+    }
+
+    .win.open{
+      opacity:1;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
+      pointer-events:auto;
+    }
+
+    .win.closing{
+      opacity:0;
+      transform: translateY(18px) scale(0.98);
+      filter: blur(10px);
+      pointer-events:none;
+    }
+
+    .win.minimized{
+      opacity:0;
+      transform: translateY(32px) scale(0.96);
+      filter: blur(12px);
+      pointer-events:none;
+    }
+
+    .win.dragging{
+      transition: none;
+    }
+
+    .win{
+      min-width: 556px;
+      min-height: 340px;
+    }
+
+    /* Disable transitions + iframe interaction while dragging/resizing */
+    .win.dragging,
+    .win.resizing{
+      transition: none !important;
+      user-select: none;
+    }
+    .win.dragging .frame,
+    .win.resizing .frame{
+      pointer-events: none;
+    }
+
+    /* Resize handles */
+    .resizeHandle{
+      position:absolute;
+      z-index: 5;
+      background: transparent;
+      touch-action: none;
+    }
+
+    /* corners */
+    .resizeHandle.nw{ left:0; top:0; width:14px; height:14px; cursor:nwse-resize; }
+    .resizeHandle.ne{ right:0; top:0; width:14px; height:14px; cursor:nesw-resize; }
+    .resizeHandle.sw{ left:0; bottom:0; width:14px; height:14px; cursor:nesw-resize; }
+    .resizeHandle.se{ right:0; bottom:0; width:18px; height:18px; cursor:nwse-resize; }
+
+    /* edges */
+    .resizeHandle.n{ left:14px; right:14px; top:0; height:10px; cursor:ns-resize; }
+    .resizeHandle.s{ left:14px; right:14px; bottom:0; height:10px; cursor:ns-resize; }
+    .resizeHandle.w{ top:14px; bottom:14px; left:0; width:10px; cursor:ew-resize; }
+    .resizeHandle.e{ top:14px; bottom:14px; right:0; width:10px; cursor:ew-resize; }
+
+    /* hide handles while “focused/maximized” */
+    .win[data-focused="1"] .resizeHandle{ display:none; }
+
+    .titlebar {
+      height: var(--titlebar-h);
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      padding: 0 10px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(0,0,0,0.25));
+      cursor: move;
+      user-select: none;
+    }
+    .titleLeft { display:flex; align-items:center; gap: 8px; min-width: 0; }
+    .titlebar{
+      height: var(--titlebar-h);
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      padding: 0 10px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(0,0,0,0.25));
+      user-select:none;
+      touch-action:none;
+    }
+
+    .winControls{ display:flex; align-items:center; gap:8px; }
+
+    .winBtn{
+      height: 24px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.06);
+      color: rgba(240,245,255,0.92);
+      font-size: 12px;
+      font-weight: 750;
+      cursor: pointer;
+      transition: transform var(--t-fast), background var(--t-fast), border-color var(--t-fast), opacity var(--t-fast);
+      display: grid;
+      place-items: center;
+    }
+    .winBtn.iconOnly{
+      width: 30px;
+      padding: 0;
+    }
+    .winBtn svg{ width: 14px; height: 14px; display:block; }
+
+    .winBtn:hover{ transform: translateY(-1px); background: rgba(255,255,255,0.10); }
+    .winBtn:active{ transform: translateY(0); opacity: 0.92; }
+
+    .winBtn.close:hover{
+      background: rgba(255,74,106,0.18);
+      border-color: rgba(255,74,106,0.35);
+    }
+
+    .winTitle {
+      font-size: 12.5px;
+      font-weight: 650;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: rgba(240,245,255,0.92);
+    }
+
+    .frame {
+      width: 100%;
+      height: calc(100% - var(--titlebar-h));
+      border: none;
+      background: transparent;
+    }
+
+    /* Mobile mode */
+    #mobileDock {
+      display: none;
+      height: var(--dock-h);
+      border-radius: 26px;
+      background: linear-gradient(135deg, rgba(10,14,34,0.92), rgba(10,14,34,0.66));
+      border: 1px solid rgba(255,255,255,0.06);
+      box-shadow: var(--shadow2);
+      backdrop-filter: blur(26px);
+      padding: 0 14px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    #homeBtn {
+      width: 44px;
+      height: 44px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.30), rgba(123,92,255,0.92));
+      box-shadow: 0 18px 50px rgba(0,0,0,0.6);
+      cursor: pointer;
+      display:grid; place-items:center;
+      transition: transform var(--t-fast), box-shadow var(--t-fast);
+      user-select: none;
+    }
+    #homeBtn:hover { transform: translateY(-2px); box-shadow: 0 20px 56px rgba(0,0,0,0.68); }
+    #mobileIcons { display:flex; gap: 8px; flex: 1; justify-content: flex-end; align-items:center; }
+
+    #appGridOverlay{
+      position:absolute;
+      inset:0;
+      display:flex;
+      flex-direction:column;
+      padding:14px;
+      background: linear-gradient(135deg, rgba(6,8,22,0.96), rgba(6,8,22,0.92));
+      z-index:50;
+
+      opacity:0;
+      visibility:hidden;
+      pointer-events:none;
+      transform: translateY(14px);
+      transition:
+        opacity var(--t-mid) var(--ease),
+        transform var(--t-mid) var(--ease),
+        visibility 0s linear var(--t-mid);
+      will-change: transform, opacity;
+    }
+    #appGridOverlay.visible{
+      opacity:1;
+      visibility:visible;
+      pointer-events:auto;
+      transform: translateY(0);
+      transition:
+        opacity var(--t-mid) var(--ease),
+        transform var(--t-mid) var(--ease),
+        visibility 0s;
+    }
+
+    .gridHead { display:flex; align-items:center; justify-content: space-between; margin-bottom: 10px; }
+    .gridTitle { font-weight: 750; font-size: 15px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      overflow: auto;
+      padding-bottom: 8px;
+    }
+    .gridItem { display:flex; flex-direction:column; align-items:center; gap: 6px; cursor:pointer; }
+    .gridName { font-size: 11px; color: var(--muted); text-align:center; }
+
+    /* Modal (OS-side editor) */
+    #modal {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: rgba(0,0,0,0.55);
+      z-index: 9998;
+    }
+    #modal.visible {
+      display: flex;
+      animation: modalIn var(--t-fast) ease forwards;
+    }
+    @keyframes modalIn {
+      0% { opacity: 0; }
+      100% { opacity: 1; }
+    }
+    .modalCard {
+      width: min(860px, 100%);
+      max-height: min(86vh, 900px);
+      border-radius: var(--radius-xl);
+      background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(0,0,0,0.24));
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(26px);
+      padding: 14px;
+      overflow: hidden;
+      display:flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .modalTop {
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .modalTitle { font-weight: 750; font-size: 14px; }
+    .modalBody { overflow:auto; padding-right: 2px; }
+    .modalActions { display:flex; gap: 10px; justify-content:flex-end; }
+
+    /* Responsive mode toggles */
+    body.desktop #taskbar { display:flex; }
+    body.desktop #mobileDock { display:none; }
+
+    body.mobile #taskbar { display:flex; }
+    body.mobile #mobileDock { display:none; }
+    body.mobile #appGridOverlay { display:none; } /* remove app drawer */
+
+    body.mobile .titlebar { cursor: default; }
+    body.mobile .win {
+      inset: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      border: none !important;
+      transform: none !important;
+    }
+
+    body.mobile #desktopFrame{
+      border-radius: 0;
+      border: none;
+      box-shadow: none;
+    }
+    body.mobile #windowsLayer{
+      inset: 0;
+    }
+
+    /* Simple scrollbars */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: rgba(0,0,0,0.28); }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 999px; }
+
+    @media (prefers-reduced-motion: reduce){
+      :root{
+        --t-fast: 1ms;
+        --t-mid: 1ms;
+        --t-long: 1ms;
+        --t-boot: 1ms;
+      }
+      *{
+        animation: none !important;
+        transition-duration: 1ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    #bootOverlay::before{
+      content:"";
+      position:absolute; inset:0;
+      background:
+        linear-gradient(transparent, rgba(255,255,255,0.03), transparent),
+        repeating-linear-gradient(180deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 1px, transparent 2px, transparent 6px);
+      opacity: 0.14;
+      mix-blend-mode: overlay;
+      pointer-events:none;
+      animation: bootScan 2.2s linear infinite;
+    }
+    @keyframes bootScan{
+      0%{ transform: translateY(-8%); }
+      100%{ transform: translateY(8%); }
+    }
+
+    .bootProgress{
+      margin-top: 12px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      overflow:hidden;
+    }
+    .bootBar{
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(var(--accent-rgb),0.65), rgba(255,255,255,0.22), rgba(var(--accent-rgb),0.95));
+      box-shadow: 0 0 18px rgba(var(--accent-rgb),0.45);
+      transition: width 180ms var(--ease);
+    }
+
+    .bootLog{
+      margin-top: 10px;
+      max-height: 140px;
+      overflow: hidden;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 11px;
+      color: rgba(210,225,255,0.78);
+      line-height: 1.45;
+      letter-spacing: 0.01em;
+    }
+    .bootLog .l{ opacity: 0.92; }
+    .bootLog .l.dim{ opacity: 0.62; }
+
+    /* Clean taskbar */
+    :root{ --taskbar-h: 56px; }
+    #taskbar{ padding: 0 10px; justify-content: space-between; gap: 10px; }
+
+    .dockLeft{
+      min-width: 180px;
+      color: var(--muted);
+      font-size: 12.5px;
+      font-weight: 650;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .iconBtn{
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      border-radius: 999px;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .appIcon{ width: 30px; height: 30px; border-radius: 10px; }
+  
+    .appIconText{ display:none; } /* we’ll show text only when no img icon exists */
+    .appIconImg{
+      width: 18px; height: 18px;
+      object-fit: contain;
+      opacity: 0.95;
+    }
+
+    .taskSearch{
+      height: 38px;
+      min-width: 92px;
+      max-width: 177px;
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 14px 34px rgba(0,0,0,0.30);
+
+      position: relative;
+      cursor: text;
+      transition: transform var(--t-fast), background var(--t-fast), box-shadow var(--t-fast), border-color var(--t-fast);
+    }
+    .taskSearch:hover{
+      transform: translateY(-3px);
+      background: rgba(255,255,255,0.14);
+      box-shadow: 0 18px 44px rgba(0,0,0,0.54);
+    }
+
+    .searchHint{
+      position:absolute;
+      left:50%;
+      bottom: calc(100% + 8px);
+      transform: translateX(-50%) translateY(6px) scale(0.98);
+      opacity:0;
+      pointer-events:none;
+
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 650;
+      color: rgba(240,245,255,0.92);
+
+      background: rgba(0,0,0,0.42);
+      border: 1px solid rgba(255,255,255,0.10);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 18px 44px rgba(0,0,0,0.48);
+
+      transition: opacity var(--t-mid) var(--ease), transform var(--t-mid) var(--ease);
+      min-width: 100px;
+    }
+    .searchHint.show{
+      opacity:1;
+      transform: translateX(-50%) translateY(0) scale(1);
+    }
+    .taskSearchIcon{ width: 16px; height: 16px; opacity: 0.95; flex: 0 0 auto; }
+    #taskSearchInput{
+      width: 100%;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 13px;
+      padding: 0;
+    }
+    #taskSearchInput{
+      -webkit-appearance: none;
+      appearance: none;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+    }
+
+    #taskSearchInput:focus,
+    #taskSearchInput:focus-visible{
+      outline: none !important;
+      box-shadow: none !important;
+    }
+    #taskSearchInput::placeholder{ color: rgba(175,190,235,0.65); }
+    .taskSearch:focus-within{
+      border-color: rgba(var(--accent-rgb),0.55);
+      box-shadow: 0 0 0 1px rgba(var(--accent-rgb),0.16), 0 14px 34px rgba(0,0,0,0.34);
+      background: rgba(255,255,255,0.06);
+    }
+    @media (max-width: 560px){
+      .taskSearch{ min-width: 160px; }
+    }
+  </style>
+</head>
+
+<body class="desktop">
+  <div id="root">
+    <!-- Welcome (first time) -->
+    <div id="screenWelcome" class="screen">
+      <div class="panel">
+        <div class="panelHead">
+          <div class="logo" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;">
+              <rect x="5" y="10" width="14" height="11" rx="3"/>
+              <path d="M8 10V8a4 4 0 0 1 8 0v2"/>
+              <path d="M12 15v2"/>
+            </svg>
+          </div>
+          <div>
+            <div class="title">Welcome to Vortex</div>
+            <div class="subtitle">A versatile virtual operating system</div>
+          </div>
+        </div>
+
+        <div class="hint">
+          Your Vortex data, preferences, and installed apps are stored in a vortex.os file that you can store almost anywhere. Locked with AES-256-GCM encryption.
+        </div>
+
+        <div class="row">
+          <button id="btnSetupNew" class="btn btnPrimary">Set up</button>
+          <button id="btnSetupRestore" class="btn">Restore from a vortex.os file</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Welcome (returning) -->
+    <div id="screenReturn" class="screen">
+      <div class="panel">
+        <div class="panelHead">
+          <div class="logo">VO</div>
+          <div>
+            <div class="title">Welcome back!</div>
+            <div class="subtitle">Type in your password to decrypt your vortex.os file</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="returnPw">Password</label>
+          <input id="returnPw" type="password" autocomplete="current-password" />
+          <div id="returnErr" class="error"></div>
+        </div>
+
+        <div class="row between">
+          <button id="btnReturnImport" class="btn btnGhost">Load different profile</button>
+          <button id="btnReturnUnlock" class="btn btnPrimary">Decrypt</button>
+        </div>
+
+        <div class="hint">
+          If you changed browsers or devices, load your last used vortex.os file.
+        </div>
+      </div>
+    </div>
+
+    <!-- Setup new -->
+    <div id="screenSetup" class="screen">
+      <div class="panel">
+        <div class="panelHead">
+          <div class="logo">VO</div>
+          <div>
+            <div class="title">Create your Vortex OS profile</div>
+            <div class="subtitle">This password encrypts your vortex.os file</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="setupPw">Create password</label>
+          <input id="setupPw" type="password" autocomplete="new-password" />
+        </div>
+
+        <div class="field">
+          <label for="setupPw2">Confirm password</label>
+          <input id="setupPw2" type="password" autocomplete="new-password" />
+          <div id="setupErr" class="error"></div>
+        </div>
+
+        <div class="row end">
+          <button id="btnCreateOS" class="btn btnPrimary">Create OS</button>
+        </div>
+
+        <div class="hint">
+          There is no recovery. If the password is lost, the OS file stays encrypted.
+        </div>
+      </div>
+    </div>
+
+    <!-- Unlock (after import) -->
+    <div id="screenUnlock" class="screen">
+      <div class="panel">
+        <div class="panelHead">
+          <div class="logo">VO</div>
+          <div>
+            <div class="title">Unlock your Vortex OS data</div>
+            <div class="subtitle">Enter the password used to make this Vortex OS Profile</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="unlockPw">OS password</label>
+          <input id="unlockPw" type="password" autocomplete="current-password" />
+          <div id="unlockErr" class="error"></div>
+        </div>
+
+        <div class="row end">
+          <button id="btnUnlock" class="btn btnPrimary">Unlock</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- OS shell -->
+    <div id="os">
+      <div id="bootOverlay">
+        <div class="bootCard">
+          <div class="bootLine">
+            <div class="bootGlow"></div>
+            <div style="flex:1;min-width:0;">
+              <div class="bootTitle" id="bootTitle">Booting Vortex OS</div>
+              <div class="bootSub" id="bootSub">Decrypting your OS file…</div>
+            </div>
+          </div>
+
+          <div class="bootProgress"><div class="bootBar" id="bootBar"></div></div>
+          <div class="bootLog" id="bootLog" aria-label="Boot log"></div>
+
+        </div>
+      </div>
+
+      <div id="main">
+        <div id="desktopFrame">
+          <div id="windowsLayer"></div>
+
+          <div id="appGridOverlay">
+            <div class="gridHead">
+              <div class="gridTitle">Apps</div>
+              <button id="btnCloseGrid" class="btn btnGhost" style="padding:7px 12px;">Close</button>
+            </div>
+            <div id="appGrid" class="grid"></div>
+          </div>
+        </div>
+
+        <div id="taskbar">
+          <div class="dockLeft">
+            <span class="clockText">
+              <span id="statusDate" class="clockPart" role="button" tabindex="0" aria-label="Open Calendar">Jan 1</span>
+              <span class="clockSep"> · </span>
+              <span id="statusTime" class="clockPart" role="button" tabindex="0" aria-label="Open Clock">00:00</span>
+            </span>
+          </div>
+
+          <div id="dockCenter" class="dockCenter"></div>
+
+          <div class="dockRight">
+            <div id="taskSearch" class="taskSearch" title="Search the web">
+              <svg class="taskSearchIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="rgba(240,245,255,0.92)" stroke-width="2"/>
+                <path d="M16.5 16.5 21 21" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <input id="taskSearchInput" type="text" placeholder="Search the web" autocomplete="off" />
+              <div id="searchHint" class="searchHint" aria-hidden="true">Push Enter to search</div>
+            </div>
+
+            <div class="profileChip" id="profileChip" title="Settings">
+              <div class="avatar"><img id="avatarImg" alt="" /></div>
+              <div class="profileName" id="profileName">Vortex User</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="mobileDock">
+          <div id="homeBtn">◦</div>
+          <div id="mobileIcons"></div>
+        </div>
+      </div>
+
+      <!-- OS-side modal editor -->
+      <div id="modal">
+        <div class="modalCard">
+          <div class="modalTop">
+            <div class="modalTitle" id="modalTitle">Modal</div>
+            <button id="btnModalClose" class="btn btnGhost" style="padding:8px 12px;">Close</button>
+          </div>
+          <div class="modalBody" id="modalBody"></div>
+          <div class="modalActions" id="modalActions"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden file inputs -->
+    <input id="fileOS" type="file" accept=".os,application/json,text/plain" style="display:none;" />
+    <input id="filePFP" type="file" accept="image/*" style="display:none;" />
+  </div>
+
+  <!-- App templates (easy to swap later) -->
+  <template id="tpl-calculator">
+<!doctype html>
+<html><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Calculator</title>
+<style>
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+  body{background:radial-gradient(900px 700px at 0% 0%, rgba(255,255,255,0.05), rgba(6,8,22,0.96));color:rgba(250,252,255,0.95);padding:14px;}
+  h1{margin:0;font-size:16px;}
+  p{margin:8px 0 0;color:rgba(175,190,235,0.78);font-size:13px;line-height:1.45;}
+  .tag{display:inline-block;margin-top:10px;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(123,92,255,0.18);border:1px solid rgba(123,92,255,0.22);color:rgba(235,230,255,0.95);}
+</style>
+</head>
+<body>
+  <h1>Calculator</h1>
+  <span class="tag">Placeholder</span>
+  <p>Advanced calculator UI goes here.</p>
+</body></html>
+  </template>
+
+  <template id="tpl-calendar">
+<!doctype html>
+<html><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Calendar</title>
+<style>
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+  body{background:radial-gradient(900px 700px at 0% 0%, rgba(255,255,255,0.05), rgba(6,8,22,0.96));color:rgba(250,252,255,0.95);padding:14px;}
+  h1{margin:0;font-size:16px;}
+  p{margin:8px 0 0;color:rgba(175,190,235,0.78);font-size:13px;line-height:1.45;}
+  .tag{display:inline-block;margin-top:10px;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(123,92,255,0.18);border:1px solid rgba(123,92,255,0.22);color:rgba(235,230,255,0.95);}
+</style>
+</head>
+<body>
+  <h1>Calendar</h1>
+  <span class="tag">Placeholder</span>
+  <p>Private offline calendars live here. No built-in holidays, no cloud sync.</p>
+</body></html>
+  </template>
+
+  <template id="tpl-vortex-chat">
+<!doctype html>
+<html><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Vortex Chat</title>
+<style>
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+  body{background:radial-gradient(900px 700px at 0% 0%, rgba(255,255,255,0.05), rgba(6,8,22,0.96));color:rgba(250,252,255,0.95);padding:14px;}
+  h1{margin:0;font-size:16px;}
+  p{margin:8px 0 0;color:rgba(175,190,235,0.78);font-size:13px;line-height:1.45;}
+  .tag{display:inline-block;margin-top:10px;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(123,92,255,0.18);border:1px solid rgba(123,92,255,0.22);color:rgba(235,230,255,0.95);}
+</style>
+</head>
+<body>
+  <h1>Vortex Chat</h1>
+  <span class="tag">Placeholder</span>
+  <p>Decentralized chat app will be integrated here.</p>
+</body></html>
+  </template>
+
+  <template id="tpl-vortex-vault">
+<!doctype html>
+<html><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Vortex Vault</title>
+<style>
+  html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+  body{background:radial-gradient(900px 700px at 0% 0%, rgba(255,255,255,0.05), rgba(6,8,22,0.96));color:rgba(250,252,255,0.95);padding:14px;}
+  h1{margin:0;font-size:16px;}
+  p{margin:8px 0 0;color:rgba(175,190,235,0.78);font-size:13px;line-height:1.45;}
+  .tag{display:inline-block;margin-top:10px;font-size:11px;padding:2px 8px;border-radius:999px;background:rgba(123,92,255,0.18);border:1px solid rgba(123,92,255,0.22);color:rgba(235,230,255,0.95);}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;color:rgba(240,245,255,0.92);}
+</style>
+</head>
+<body>
+  <h1>Vortex Vault</h1>
+  <span class="tag">Paste your Vault HTML here</span>
+  <p>
+    Replace the entire contents of template id <code>tpl-vortex-vault</code> with your full Vault app HTML.
+  </p>
+</body></html>
+  </template>
+
+  <template id="tpl-settings">
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Settings</title>
+  <style>
+    :root{
+      --text: rgba(250,252,255,0.95);
+      --muted: rgba(175,190,235,0.78);
+      --stroke: rgba(255,255,255,0.08);
+      --surface: rgba(10,14,34,0.70);
+      --surface2: rgba(6,8,22,0.86);
+      --accent: #2f6bff;
+      --danger: #ff4a6a;
+      --r: 14px;
+      --t: 240ms;
+      --wallpaper: radial-gradient(900px 700px at 0% 0%, rgba(255,255,255,0.05), rgba(0,0,0,0.96));
+      --glass: rgba(0,0,0,0.21);
+      --bodyTint: rgba(0,0,0,0.14);
+      --glassBlur: 3.5px;
+    }
+    html,body{
+      height:100%;
+      margin:0;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+      background: var(--wallpaper);
+      color:var(--text);
+    }
+    body::before{
+      content:"";
+      position: fixed;
+      inset: 0;
+      background: var(--bodyTint);
+      pointer-events: none;
+    }
+    .wrap{height:100%;display:flex;gap:12px;padding:12px;box-sizing:border-box;}
+    .side{
+      width: 160px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.06), var(--glass));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: var(--r);
+      padding: 8px;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+    }
+    .content{
+      flex: 1;
+      background: linear-gradient(135deg, rgba(255,255,255,0.06), var(--glass));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: var(--r);
+      padding: 10px 12px;
+      overflow: auto;
+    }
+    @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))){
+      .side, .content{
+        -webkit-backdrop-filter: blur(var(--glassBlur));
+        backdrop-filter: blur(var(--glassBlur));
+      }
+    }
+    .tab{
+      border:none;
+      background: transparent;
+      color: var(--muted);
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor:pointer;
+      text-align:left;
+      transition: background var(--t), color var(--t);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    :root{ --accent-rgb: 47,107,255; }
+    .tab.active{
+      background: rgba(var(--accent-rgb), 0.18);
+      color: var(--text);
+      border: 1px solid rgba(var(--accent-rgb), 0.22);
+    }
+    h2{margin:0 0 8px;font-size:14px;}
+    .hint{font-size:12px;color:var(--muted);line-height:1.45;}
+    label{display:block;font-size:12px;color:var(--muted);margin:10px 0 6px;}
+    input[type="text"], select{
+      width:100%;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.10);
+      background: rgba(6,8,22,0.92);
+      color: var(--text);
+      padding: 10px 12px;
+      outline:none;
+      transition: box-shadow var(--t), border-color var(--t), background var(--t);
+    }
+
+    input[type="text"]:focus, select:focus{
+      border-color: rgba(var(--accent-rgb), 0.92);
+      box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.55);
+      background: rgba(6,8,22,0.96);
+    }
+
+    select{
+      -webkit-appearance: none;
+      appearance: none;
+      padding-right: 38px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M7 10l5 5 5-5' stroke='rgba(240,245,255,0.88)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 16px 16px;
+    }
+
+    #username{ max-width: 220px; } /* prevents “too wide / overflow” feel */
+    input[type="checkbox"]{ accent-color: var(--accent); }
+
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:center;}
+    .btn{
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      padding: 8px 12px;
+      cursor:pointer;
+      font-size: 12px;
+      font-weight: 700;
+      transition: transform var(--t), background var(--t), opacity var(--t);
+    }
+    .btn:not(.danger):hover{transform: translateY(-1px); background: rgba(255,255,255,0.10);}
+    .btn.danger{border-color: rgba(255,74,106,0.55); color: rgba(255,200,214,0.95);}
+    .btn.danger:hover{background: rgba(255,74,106,0.18);}
+    .pfp{
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.85), rgba(123,92,255,0.90));
+      overflow: hidden;
+      flex: 0 0 auto;
+    }
+    .pfp img{width:100%;height:100%;object-fit:cover;display:none;}
+    .list{margin-top:10px;display:flex;flex-direction:column;gap:8px;}
+    .item{
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(0,0,0,0.28);
+      padding: 8px 10px;
+      display:flex;
+      justify-content:space-between;
+      gap: 10px;
+      align-items:center;
+      font-size: 12px;
+    }
+    .itemName{color: rgba(245,248,255,0.92); font-weight: 650; overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width: 220px;}
+    .miniRow{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+    .swatches{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;}
+    .swatch{
+      width: 62px;
+      height: 40px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.14);
+      cursor:pointer;
+      position: relative;
+      overflow:hidden;
+    }
+    .swatch.active::after{
+      content:"✓";
+      position:absolute;
+      right:6px;
+      bottom:4px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.95);
+      text-shadow: 0 2px 10px rgba(0,0,0,0.55);
+    }
+    .divider{height:1px;margin:12px 0;background: linear-gradient(90deg, transparent, rgba(255,255,255,0.14), transparent);}
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="side">
+      <button class="tab active" data-tab="profile">Profile</button>
+      <button class="tab" data-tab="appearance">Appearance</button>
+      <button class="tab" data-tab="os">OS</button>
+      <button class="tab" data-tab="apps">Apps</button>
+    </div>
+
+    <div class="content">
+      <section id="tab-profile">
+        <h2>Profile</h2>
+        <div class="hint">Your profile is stored inside the encrypted Vortex OS file.</div>
+        <div class="row" style="margin-top:12px;">
+          <div class="pfp"><img id="pfpImg" alt="" /></div>
+          <div style="flex:1;min-width: 180px;">
+            <label for="username">Display name</label>
+            <input id="username" type="text" placeholder="Vortex User" />
+            <div class="row">
+              <button id="btnPfpUpload" class="btn">Change picture</button>
+              <button id="btnPfpClear" class="btn danger">Remove</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-appearance" style="display:none;">
+        <h2>Appearance</h2>
+        <div class="hint">Choose a wallpaper style. This only affects the OS shell.</div>
+        <div class="swatches" id="swatches"></div>
+      </section>
+
+      <section id="tab-os" style="display:none;">
+        <h2>OS</h2>
+        <div class="hint">Export and import your encrypted OS file.</div>
+        <div class="row">
+          <button id="btnExport" class="btn">Export vortex.os</button>
+          <button id="btnImport" class="btn">Import vortex.os</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <h2>Clock</h2>
+        <div class="hint">Control the time display in the OS taskbar.</div>
+
+        <label for="timeFormat">Time format</label>
+        <select id="timeFormat">
+          <option value="24">24-hour</option>
+          <option value="12">12-hour</option>
+        </select>
+
+        <div class="row" style="margin-top:10px;">
+          <label style="margin:0;display:flex;align-items:center;gap:10px;">
+            <input id="showSeconds" type="checkbox" />
+            Show seconds
+          </label>
+        </div>
+
+        <div class="divider"></div>
+
+        <h2>Search</h2>
+        <div class="hint">Sets the default engine for the taskbar search button. Shift+Enter always searches onion links via Torry.</div>
+
+        <label for="searchEngine">Default search engine</label>
+        <select id="searchEngine">
+          <option value="duckduckgo">DuckDuckGo</option>
+          <option value="torry">Torry (onion search)</option>
+          <option value="qwant">Qwant</option>
+          <option value="google">Google</option>
+        </select>
+
+        <div class="divider"></div>
+
+        <h2>Fullscreen</h2>
+        <div class="hint">Works best in desktop browsers. iOS full-screen requires Add to Home Screen.</div>
+        <div class="row">
+          <button id="btnEnterFullscreen" class="btn">Enter fullscreen</button>
+          <button id="btnExitFullscreen" class="btn danger">Exit fullscreen</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <h2>Vortex Vault</h2>
+        <div class="hint">Reset Vault-to-stock will be wired after Vault integration. This will send a reset request to the Vault iframe.</div>
+        <div class="row">
+          <button id="btnResetVault" class="btn danger">Reset Vault to stock</button>
+        </div>
+      </section>
+
+      <section id="tab-apps" style="display:none;">
+        <h2>Apps</h2>
+        <div class="hint">Manage built-in editable apps and your custom apps.</div>
+        <div class="row">
+          <button id="btnAddApp" class="btn">Add app</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <h2>Installed</h2>
+        <div class="list" id="appList"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    const tabs = document.querySelectorAll(".tab");
+    const sections = {
+      profile: document.getElementById("tab-profile"),
+      appearance: document.getElementById("tab-appearance"),
+      os: document.getElementById("tab-os"),
+      apps: document.getElementById("tab-apps")
+    };
+
+    const username = document.getElementById("username");
+    const pfpImg = document.getElementById("pfpImg");
+    const swatches = document.getElementById("swatches");
+    const appList = document.getElementById("appList");
+    const timeFormat = document.getElementById("timeFormat");
+    const showSeconds = document.getElementById("showSeconds");
+    const searchEngine = document.getElementById("searchEngine");
+
+    let state = null;
+
+    function showTab(key){
+      tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === key));
+      Object.keys(sections).forEach(k => sections[k].style.display = (k === key ? "" : "none"));
+    }
+
+    tabs.forEach(btn => btn.addEventListener("click", () => showTab(btn.dataset.tab)));
+
+    function setAccentVars(accentHex, accentRgbCsv){
+      document.documentElement.style.setProperty("--accent", accentHex || "#2f6bff");
+      document.documentElement.style.setProperty("--accent-rgb", accentRgbCsv || "47,107,255");
+    }
+
+    function render(){
+      if (!state) return;
+
+      setAccentVars(state.accent, state.accentRgb);
+
+      // Match Settings background to the selected appearance
+      const themeId = state.appearance?.themeId || "neon-blue";
+
+      // Settings app always uses a darker "dark-mode style" wallpaper (tinted by current accent)
+      if (state.settingsWallpaper){
+        document.documentElement.style.setProperty("--wallpaper", state.settingsWallpaper);
+      } else {
+        const t = (state.themes || []).find(x => x.id === themeId);
+        if (t && t.bg){
+          document.documentElement.style.setProperty("--wallpaper", t.bg);
+        }
+      }
+
+      // Glass tuning: default 21% tint, with a bit more for the darkest theme
+      let glassTint = 0.21;
+      let bodyTint  = 0.10;
+
+      if (themeId === "void"){      glassTint = 0.23; bodyTint = 0.12; }
+      if (themeId === "dark-mode"){ glassTint = 0.30; bodyTint = 0.16; }
+
+      document.documentElement.style.setProperty("--glass", `rgba(0,0,0,${glassTint})`);
+      document.documentElement.style.setProperty("--bodyTint", `rgba(0,0,0,${bodyTint})`);
+
+      // OS prefs
+      const os = state.os || {};
+      if (timeFormat) timeFormat.value = (os.clock24h === false) ? "12" : "24";
+      if (showSeconds) showSeconds.checked = !!os.showSeconds;
+      if (searchEngine) searchEngine.value = (os.searchEngine || "duckduckgo");
+
+      // Profile
+      username.value = (state.profile?.username || "").trim();
+      const pfp = state.profile?.pfpDataUrl;
+      if (pfp){
+        pfpImg.src = pfp;
+        pfpImg.style.display = "block";
+      } else {
+        pfpImg.style.display = "none";
+      }
+
+      // Themes
+      swatches.innerHTML = "";
+      const cur = state.appearance?.themeId || "neon-blue";
+      (state.themes || []).forEach(t => {
+        const d = document.createElement("div");
+        d.className = "swatch" + (t.id === cur ? " active" : "");
+        d.style.background = t.bg;
+        d.style.backgroundSize = "100% 100%";
+        d.style.backgroundPosition = "center";
+        d.title = t.name;
+        d.addEventListener("click", () => {
+          parent.postMessage({ type: "vortex.settings.setTheme", themeId: t.id }, "*");
+        });
+        swatches.appendChild(d);
+      });
+
+      // Apps list
+      appList.innerHTML = "";
+      (state.apps || []).forEach(item => {
+        const row = document.createElement("div");
+        row.className = "item";
+
+        const name = document.createElement("div");
+        name.className = "itemName";
+        name.textContent = item.name;
+
+        const right = document.createElement("div");
+        right.className = "miniRow";
+
+        if (item.editable){
+          const edit = document.createElement("button");
+          edit.className = "btn";
+          edit.textContent = "Edit";
+          edit.addEventListener("click", ()=>{
+            parent.postMessage({ type: "vortex.os.editApp", appId: item.id }, "*");
+          });
+          right.appendChild(edit);
+        }
+
+        if (item.kind === "user"){
+          const del = document.createElement("button");
+          del.className = "btn danger";
+          del.textContent = "Delete";
+          del.addEventListener("click", ()=>{
+            parent.postMessage({ type: "vortex.os.deleteApp", appId: item.id }, "*");
+          });
+          right.appendChild(del);
+        }
+
+        row.appendChild(name);
+        row.appendChild(right);
+        appList.appendChild(row);
+      });
+    }
+
+    // outgoing events
+    username.addEventListener("input", (e) => {
+      parent.postMessage({ type: "vortex.settings.username", value: e.target.value }, "*");
+    });
+
+    function postOsPref(key, value){
+      parent.postMessage({ type: "vortex.settings.osPref", key, value }, "*");
+    }
+
+    timeFormat && timeFormat.addEventListener("change", ()=>{
+      postOsPref("clock24h", timeFormat.value === "24");
+    });
+
+    showSeconds && showSeconds.addEventListener("change", ()=>{
+      postOsPref("showSeconds", !!showSeconds.checked);
+    });
+
+    searchEngine && searchEngine.addEventListener("change", ()=>{
+      postOsPref("searchEngine", searchEngine.value);
+    });
+
+    document.addEventListener("click", (e) => {
+      const id = e.target && e.target.id;
+      if (!id) return;
+      parent.postMessage({ type: "vortex.settings.click", id }, "*");
+    });
+
+    // incoming state
+    window.addEventListener("message", (e) => {
+      const msg = e.data;
+      if (!msg || typeof msg !== "object") return;
+      if (msg.type === "vortex.settings.state"){
+        state = msg.state || null;
+        render();
+      }
+    });
+
+    window.addEventListener("DOMContentLoaded", () => {
+      parent.postMessage({ type: "vortex.settings.ready" }, "*");
+    });
+
+    showTab("profile");
+  })();
+  </script>
+</body>
+</html>
+  </template>
+
+  <script>
+    (function(){
+      const DB_NAME = "vortex-os-db";
+      const DB_STORE = "kv";
+      const DB_KEY = "osBlob";
+      const LS_FALLBACK_KEY = "vortexOS_blob_fallback_v1";
+
+      const KDF_ITER = 1000000;
+      const MAX_USER_APPS = 64;
+
+      const OS_SCROLL_CSS = `
+        :root { color-scheme: dark; }
+        * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.28) rgba(0,0,0,0.28); }
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.28); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.22); border-radius: 999px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.30); }
+      `;
+
+      // If a built-in app id is set here (non-empty), the OS will launch it via iframe.src (URL mode).
+
+      // If empty/missing, the OS falls back to srcdoc templates (single-file mode).
+      const BUILTIN_URLS = {
+        calculator: "",
+        calendar: "",
+        clock: "",
+        settings: "",
+        "vortex-chat": "",
+        "vortex-vault": ""
+      };
+
+
+      const MAGIC = "VORTEX_OS_BLOB_V1";
+
+      const THEME_PRESETS = [
+        { id:"neon-cyan",   name:"Neon Cyan",   accent:"#00E5FF", accent2:"#00FFA3" },
+        { id:"neon-blue",   name:"Neon Blue",   accent:"#2D8CFF", accent2:"#00B8FF" },
+        { id:"neon-orange", name:"Neon Orange", accent:"#FF7A00", accent2:"#FFD000" },
+        { id:"neon-pink",   name:"Neon Pink",   accent:"#FF2EDC", accent2:"#FF6A88" },
+        { id:"neon-lime",   name:"Neon Lime",   accent:"#A6FF00", accent2:"#00FFA3" },
+        { id:"amethyst",    name:"Amethyst",    accent:"#B35CFF", accent2:"#7B5CFF" },
+        { id:"ember",       name:"Ember",       accent:"#FF4D2E", accent2:"#FFB36A" },
+        { id:"void",        name:"Void",        accent:"#D7DBFF", accent2:"#7B5CFF" }, // keep accents, darken via wallpaper math below
+        { id:"dark-mode",   name:"Dark Mode", accent:"#9AA3B2", accent2:"#E7ECF5" }
+      ];
+
+      function svgToDataUrl(svg){
+        return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg.trim());
+      }
+
+      const BUILTIN_SVGS = {
+        calculator: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="6" y="3" width="12" height="18" rx="3"/>
+          <rect x="8" y="5.5" width="8" height="3" rx="1"/>
+          <path d="M9 11h.01M12 11h.01M15 11h.01"/>
+          <path d="M9 14h.01M12 14h.01M15 14h.01"/>
+          <path d="M9 17h.01M12 17h.01M15 17h.01"/>
+        </svg>`,
+        calendar: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="5" width="16" height="15" rx="3"/>
+          <path d="M8 3v4M16 3v4M4 9h16"/>
+          <path d="M8 12h.01M12 12h.01M16 12h.01"/>
+          <path d="M8 15h.01M12 15h.01M16 15h.01"/>
+        </svg>`,
+        clock: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="8"/>
+          <path d="M12 8v5l3 2"/>
+        </svg>`,
+        settings: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.15.09a2 2 0 0 1-2-.03l-.16-.1a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.18a2 2 0 0 1-1 1.73l-.15.1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.16-.1a2 2 0 0 1 2-.03l.15.09a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.15-.09a2 2 0 0 1 2 .03l.16.1a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.73v-.18a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.16.1a2 2 0 0 1-2 .03l-.15-.09a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>`,
+        chat: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 14a4 4 0 0 1-4 4H9l-5 3V6a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v8Z"/>
+          <path d="M8 9h8M8 12h6"/>
+        </svg>`,
+        vault: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="10" width="14" height="11" rx="3"/>
+          <path d="M8 10V8a4 4 0 0 1 8 0v2"/>
+          <path d="M12 15v2"/>
+        </svg>`
+      };
+
+      const BUILTINS = [
+        { id: "calculator",  name: "Calculator",  icon: svgToDataUrl(BUILTIN_SVGS.calculator),  tpl: "tpl-calculator",  editable: true,  kind: "system" },
+        { id: "calendar",    name: "Calendar",    icon: svgToDataUrl(BUILTIN_SVGS.calendar),    tpl: "tpl-calendar",    editable: true,  kind: "system" },
+        { id: "clock",       name: "Clock",       icon: svgToDataUrl(BUILTIN_SVGS.clock),       tpl: "tpl-clock",       editable: true,  kind: "system" },
+        { id: "settings",    name: "Settings",    icon: svgToDataUrl(BUILTIN_SVGS.settings),    tpl: "tpl-settings",    editable: false, kind: "system" },
+        { id: "vortex-chat", name: "Vortex Chat", icon: svgToDataUrl(BUILTIN_SVGS.chat),        tpl: "tpl-vortex-chat", editable: false, kind: "vortex" },
+        { id: "vortex-vault",name: "Vortex Vault",icon: svgToDataUrl(BUILTIN_SVGS.vault),       tpl: "tpl-vortex-vault",editable: false, kind: "vortex" }
+      ].sort((a,b)=>a.name.localeCompare(b.name));
+
+      const el = (id) => document.getElementById(id);
+
+      const screenWelcome = el("screenWelcome");
+      const screenReturn  = el("screenReturn");
+      const screenSetup   = el("screenSetup");
+      const screenUnlock  = el("screenUnlock");
+
+      const osShell = el("os");
+      const bootOverlay = el("bootOverlay");
+      const bootTitle = el("bootTitle");
+      const bootSub = el("bootSub");
+
+      const bootBar = el("bootBar");
+      const bootLog = el("bootLog");
+
+      const statusDate = el("statusDate");
+      const statusTime = el("statusTime");
+      const modePill = el("modePill");
+
+      const profileChip = el("profileChip");
+      const profileName = el("profileName");
+      const avatarImg = el("avatarImg");
+
+      const windowsLayer = el("windowsLayer");
+      const dockCenter = el("dockCenter");
+      const mobileIcons = el("mobileIcons");
+
+      const appGridOverlay = el("appGridOverlay");
+      const appGrid = el("appGrid");
+
+      const modal = el("modal");
+      const modalTitle = el("modalTitle");
+      const modalBody = el("modalBody");
+      const modalActions = el("modalActions");
+
+      const fileOS = el("fileOS");
+      const filePFP = el("filePFP");
+
+      const WIN_ANIM_MS = 320; // keep aligned with --t-mid
+
+      let decryptedConfig = null;
+      let currentPassword = null;
+
+      let openWindows = new Map();
+      let zTop = 20;
+
+      let gridVisible = false;
+
+      function setScreen(which){
+        [screenWelcome, screenReturn, screenSetup, screenUnlock].forEach(s => s.classList.remove("active"));
+        osShell.classList.remove("active");
+        if (which === "welcome") screenWelcome.classList.add("active");
+        if (which === "return")  screenReturn.classList.add("active");
+        if (which === "setup")   screenSetup.classList.add("active");
+        if (which === "unlock")  screenUnlock.classList.add("active");
+        if (which === "os")      osShell.classList.add("active");
+      }
+
+      function setBoot(on, titleText, subText){
+        bootTitle.textContent = titleText || "Starting Vortex OS";
+        bootSub.textContent = subText || "";
+        bootOverlay.classList.toggle("active", !!on);
+
+        if (on){
+          if (bootLog) bootLog.innerHTML = "";
+          setBootProgress(0);
+        }
+      }
+
+      function setBodyMode(){
+        const isMobile = window.innerWidth < 820;
+        document.body.classList.toggle("mobile", isMobile);
+        document.body.classList.toggle("desktop", !isMobile);
+        if (modePill) modePill.textContent = isMobile ? "Phone" : "Desktop";
+        if (!isMobile) hideGrid();
+        snapWindowsForMode();
+      }
+
+      function snapWindowsForMode(){
+        const isMobile = document.body.classList.contains("mobile");
+        if (!isMobile) return;
+
+        for (const [id, win] of openWindows.entries()){
+          win.style.left = "0px";
+          win.style.top = "0px";
+          win.style.width = "100%";
+          win.style.height = "100%";
+        }
+      }
+
+      function showGrid(){
+        gridVisible = true;
+        appGridOverlay.classList.add("visible");
+      }
+      function hideGrid(){
+        gridVisible = false;
+        appGridOverlay.classList.remove("visible");
+      }
+
+      function uint8ToB64(u8){
+        let bin = "";
+        for (let i=0;i<u8.length;i++) bin += String.fromCharCode(u8[i]);
+        return btoa(bin);
+      }
+      function b64ToUint8(b64){
+        const bin = atob(b64);
+        const u8 = new Uint8Array(bin.length);
+        for (let i=0;i<bin.length;i++) u8[i] = bin.charCodeAt(i);
+        return u8;
+      }
+
+      async function deriveKey(password, salt, iter){
+        const enc = new TextEncoder();
+        const keyMat = await crypto.subtle.importKey(
+          "raw",
+          enc.encode(password),
+          { name: "PBKDF2" },
+          false,
+          ["deriveKey"]
+        );
+        return crypto.subtle.deriveKey(
+          { name: "PBKDF2", salt, iterations: iter, hash: "SHA-256" },
+          keyMat,
+          { name: "AES-GCM", length: 256 },
+          false,
+          ["encrypt","decrypt"]
+        );
+      }
+
+      async function encryptConfig(config, password){
+        const enc = new TextEncoder();
+        const plaintext = enc.encode(JSON.stringify(config));
+
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+
+        const key = await deriveKey(password, salt, KDF_ITER);
+        const cipherBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
+        const cipher = new Uint8Array(cipherBuf);
+
+        return {
+          magic: MAGIC,
+          v: 1,
+          kdf: { name: "PBKDF2", hash: "SHA-256", iter: KDF_ITER, salt: uint8ToB64(salt) },
+          cipher: { name: "AES-GCM", iv: uint8ToB64(iv), data: uint8ToB64(cipher) }
+        };
+      }
+
+      async function decryptConfig(blob, password){
+        if (!blob || blob.magic !== MAGIC) throw new Error("Bad blob");
+        const salt = b64ToUint8(blob.kdf.salt);
+        const iv = b64ToUint8(blob.cipher.iv);
+        const data = b64ToUint8(blob.cipher.data);
+
+        const key = await deriveKey(password, salt, blob.kdf.iter || KDF_ITER);
+        const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
+        const dec = new TextDecoder();
+        return JSON.parse(dec.decode(plainBuf));
+      }
+
+      function defaultConfig(){
+        return {
+          v: 1,
+          createdAt: Date.now(),
+          profile: { username: "Awesome Person", pfpDataUrl: null },
+          appearance: { themeId: "neon-blue" },
+
+          os: {
+            clock24h: false,
+            showSeconds: false,
+            searchEngine: "duckduckgo"
+          },
+
+          apps: {
+            user: [],
+            overrides: {},        // HTML overrides for built-ins
+            metaOverrides: {}     // { [appId]: { name, icon } }
+          }
+        };
+      }
+
+      function applyTheme(){
+        const themeId = decryptedConfig?.appearance?.themeId || "neon-blue";
+        const theme = THEME_PRESETS.find(t => t.id === themeId) || THEME_PRESETS[0];
+
+        document.getElementById("root").style.background = makeWallpaperBg(theme.accent || "#2f6bff", themeId);
+
+        // OS-wide accent variables
+        document.documentElement.style.setProperty("--accent", theme.accent || "#2f6bff");
+        document.documentElement.style.setProperty("--accent2", theme.accent2 || theme.accent || "#4a92ff");
+        document.documentElement.style.setProperty("--accent-rgb", hexToRgbCsv(theme.accent || "#2f6bff"));
+
+        // Profile chip text/avatar
+        profileName.textContent = (decryptedConfig?.profile?.username || "Vortex User").trim() || "Vortex User";
+        const pfp = decryptedConfig?.profile?.pfpDataUrl;
+        if (pfp){
+          avatarImg.src = pfp;
+          avatarImg.style.display = "block";
+        } else {
+          avatarImg.style.display = "none";
+        }
+      }
+
+      function openModal(title, bodyNode, actions){
+        modalTitle.textContent = title;
+        modalBody.innerHTML = "";
+        modalActions.innerHTML = "";
+        modalBody.appendChild(bodyNode);
+
+        actions.forEach(btn => modalActions.appendChild(btn));
+        modal.classList.add("visible");
+      }
+      function closeModal(){
+        modal.classList.remove("visible");
+        modalBody.innerHTML = "";
+        modalActions.innerHTML = "";
+      }
+
+      function encodeQueryPlus(q){
+        return encodeURIComponent(String(q || "").trim()).replace(/%20/g, "+");
+      }
+
+      function buildSearchUrl(query, engine, forceOnion){
+        const q = encodeQueryPlus(query);
+        if (!q) return "";
+
+        if (forceOnion){
+          return `https://www.torry.io/search/?q=${q}&type=oniontab`;
+        }
+
+        const e = String(engine || "duckduckgo").toLowerCase();
+        if (e === "google") return `https://www.google.com/search?q=${q}`;
+        if (e === "qwant") return `https://www.qwant.com/?q=${q}&t=web`;
+        if (e === "torry") return `https://www.torry.io/search/?q=${q}&type=oniontab`;
+
+        // default: DuckDuckGo
+        return `https://duckduckgo.com/?t=h_&q=${q}&ia=web`;
+      }
+
+      function tplHtml(id){
+        const t = document.getElementById(id);
+        return (t && t.innerHTML) ? t.innerHTML.trim() : "<!doctype html><html><body>Missing template</body></html>";
+      }
+
+      function injectCssIntoHtml(html, cssText){
+        const css = `<style>${cssText}</style>`;
+
+        // If there is a <head>, inject right after it opens
+        if (/<head[^>]*>/i.test(html)){
+          return html.replace(/<head[^>]*>/i, (m)=> m + css);
+        }
+
+        // If there is an <html> but no <head>, create a head
+        if (/<html[^>]*>/i.test(html)){
+          return html.replace(/<html[^>]*>/i, (m)=> m + `<head>${css}</head>`);
+        }
+
+        // Fallback: wrap whatever this is into a full doc
+        return `<!doctype html><html><head>${css}</head><body>${html}</body></html>`;
+      }
+
+      function getBuiltinHtml(appId){
+        const builtin = BUILTINS.find(a => a.id === appId);
+        if (!builtin) return "<!doctype html><html><body>Unknown app</body></html>";
+
+        const override = decryptedConfig?.apps?.overrides?.[appId];
+        if (override && typeof override === "string" && override.trim().length > 0){
+          return injectCssIntoHtml(override, OS_SCROLL_CSS);
+        }
+
+        return injectCssIntoHtml(tplHtml(builtin.tpl), OS_SCROLL_CSS);
+      }
+
+      function resolveLaunchSpec(appMeta){
+        // Built in apps can optionally launch via URL using BUILTIN_URLS
+        if (appMeta.kind === "builtin"){
+          const u = (BUILTIN_URLS[appMeta.id] || "").trim();
+          if (u) return { type: "url", url: u };
+          return { type: "html", html: getBuiltinHtml(appMeta.id) };
+        }
+
+        // User apps can be inline HTML or URL-based
+        const t = String(appMeta.type || "html").toLowerCase();
+        if (t === "url"){
+          const u = String(appMeta.url || "").trim();
+          if (u) return { type: "url", url: u };
+        }
+
+        return {
+          type: "html",
+          html: injectCssIntoHtml(
+            (appMeta.html || "<!doctype html><html><body>Empty app</body></html>"),
+            OS_SCROLL_CSS
+          )
+        };
+      }
+
+
+      function sandboxForApp(app){
+        // Default: isolate. Apps communicate via postMessage.
+        // "trusted" allows same-origin capabilities (storage/cookies/etc) for the iframe content.
+        const mode = (app && app.sandboxMode) ? app.sandboxMode : "strict";
+        if (mode === "trusted") return "allow-scripts allow-forms allow-same-origin";
+        return "allow-scripts allow-forms";
+      }
+
+
+      function bringToFront(win){
+        zTop += 1;
+        win.style.zIndex = String(zTop);
+      }
+
+      function px(n){ return `${Math.round(n)}px`; }
+
+      function clamp(v, min, max){ return Math.max(min, Math.min(v, max)); }
+
+      function attachResizeHandles(win){
+        const dirs = ["n","e","s","w","nw","ne","sw","se"];
+        dirs.forEach(d=>{
+          const h = document.createElement("div");
+          h.className = `resizeHandle ${d}`;
+          h.dataset.dir = d;
+          win.appendChild(h);
+        });
+
+        let r = null;
+
+        function startResize(e, dir){
+          if (document.body.classList.contains("mobile")) return;
+          if (win.dataset.focused === "1") return; // don’t resize when maximized
+          e.preventDefault();
+          e.stopPropagation();
+
+          bringToFront(win);
+
+          const area = windowsLayer.getBoundingClientRect();
+
+          const startLeft = win.offsetLeft;
+          const startTop  = win.offsetTop;
+          const startW = win.getBoundingClientRect().width;
+          const startH = win.getBoundingClientRect().height;
+
+          r = {
+            dir,
+            pid: e.pointerId,
+            sx: e.clientX,
+            sy: e.clientY,
+            left: startLeft,
+            top: startTop,
+            w: startW,
+            h: startH,
+            areaW: area.width,
+            areaH: area.height
+          };
+
+          win.classList.add("resizing");
+          document.body.style.userSelect = "none";
+          document.documentElement.style.cursor = getComputedStyle(e.target).cursor || "nwse-resize";
+
+          e.target.setPointerCapture(e.pointerId);
+        }
+
+        function moveResize(e){
+          if (!r) return;
+
+          const minW = 556;
+          const minH = 340;
+
+          let dx = e.clientX - r.sx;
+          let dy = e.clientY - r.sy;
+
+          let left = r.left;
+          let top  = r.top;
+          let w    = r.w;
+          let h    = r.h;
+
+          const d = r.dir;
+
+          // horizontal
+          if (d.includes("e")) w = r.w + dx;
+          if (d.includes("w")){
+            w = r.w - dx;
+            left = r.left + dx;
+          }
+
+          // vertical
+          if (d.includes("s")) h = r.h + dy;
+          if (d.includes("n")){
+            h = r.h - dy;
+            top = r.top + dy;
+          }
+
+          // clamp size
+          w = Math.max(minW, w);
+          h = Math.max(minH, h);
+
+          // clamp position so window stays inside layer
+          left = clamp(left, 0, r.areaW - w);
+          top  = clamp(top, 0, r.areaH - h);
+
+          // also clamp size to not overflow after clamping position
+          w = clamp(w, minW, r.areaW - left);
+          h = clamp(h, minH, r.areaH - top);
+
+          win.style.left = px(left);
+          win.style.top  = px(top);
+          win.style.width  = px(w);
+          win.style.height = px(h);
+        }
+
+        function endResize(e){
+          if (!r) return;
+          try{ e.target.releasePointerCapture(r.pid); } catch {}
+          r = null;
+          win.classList.remove("resizing");
+          document.body.style.userSelect = "";
+          document.documentElement.style.cursor = "";
+        }
+
+        win.querySelectorAll(".resizeHandle").forEach(h=>{
+          h.addEventListener("pointerdown", (e)=> startResize(e, h.dataset.dir));
+          h.addEventListener("pointermove", moveResize);
+          h.addEventListener("pointerup", endResize);
+          h.addEventListener("pointercancel", endResize);
+        });
+      }
+
+      let focusedAppId = null;
+
+      function setIconFocused(appId, focused){
+        const i1 = dockCenter.querySelector(`[data-app="${appId}"]`);
+        const i2 = mobileIcons.querySelector(`[data-app="${appId}"]`);
+        if (i1) i1.classList.toggle("focused", focused);
+        if (i2) i2.classList.toggle("focused", focused);
+      }
+
+      function focusApp(appId){
+        if (focusedAppId && focusedAppId !== appId) setIconFocused(focusedAppId, false);
+        focusedAppId = appId;
+        setIconFocused(appId, true);
+      }
+
+      function dockWindow(appId){
+        const win = openWindows.get(appId);
+        if (!win) return;
+        win.classList.add("minimized");
+        win.classList.remove("open");
+        setIconActive(appId, true); // still running
+        setIconFocused(appId, false);
+      }
+
+      function restoreWindow(appId){
+        const win = openWindows.get(appId);
+        if (!win) return;
+        win.classList.remove("minimized");
+        win.classList.add("open");
+        bringToFront(win);
+        focusApp(appId);
+      }
+
+      function setIconActive(appId, active){
+        const i1 = dockCenter.querySelector(`[data-app="${appId}"]`);
+        const i2 = mobileIcons.querySelector(`[data-app="${appId}"]`);
+        if (i1) i1.classList.toggle("active", active);
+        if (i2) i2.classList.toggle("active", active);
+      }
+
+      function closeWindow(appId){
+        const win = openWindows.get(appId);
+        if (!win) return;
+
+        win.classList.remove("open", "minimized");
+        win.classList.add("closing");
+        setIconFocused(appId, false);
+
+        setTimeout(() => {
+          win.remove();
+          openWindows.delete(appId);
+          setIconActive(appId, false);
+          if (focusedAppId === appId) focusedAppId = null;
+        }, WIN_ANIM_MS);
+      }
+
+      function createWindow(appMeta){
+        const isMobile = document.body.classList.contains("mobile");
+
+        const win = document.createElement("div");
+        win.className = "win"; // start closed state (so transition can run)
+        win.dataset.app = appMeta.id;
+        win.style.zIndex = String(++zTop);
+
+        if (!isMobile){
+          const idx = openWindows.size;
+          win.style.left = `${18 + idx*26}px`;
+          win.style.top = `${18 + idx*18}px`;
+        } else {
+          win.style.left = "0px";
+          win.style.top = "0px";
+          win.style.width = "100%";
+          win.style.height = "100%";
+        }
+
+        const bar = document.createElement("div");
+        bar.className = "titlebar";
+
+        const left = document.createElement("div");
+        left.className = "titleLeft";
+
+        const title = document.createElement("div");
+        title.className = "winTitle";
+        title.textContent = appMeta.name;
+
+        left.appendChild(title);
+
+        const controls = document.createElement("div");
+        controls.className = "winControls";
+
+        const btnDock  = document.createElement("button");
+        const btnFocus = document.createElement("button");
+        const btnClose = document.createElement("button");
+
+        btnDock.className  = "winBtn iconOnly";
+        btnFocus.className = "winBtn iconOnly";
+        btnClose.className = "winBtn iconOnly close";
+
+        btnDock.title = "Minimize to dock";
+        btnFocus.title = "Toggle fullscreen";
+        btnClose.title = "Close";
+
+        btnDock.setAttribute("aria-label", "Minimize to dock");
+        btnFocus.setAttribute("aria-label", "Toggle fullscreen");
+        btnClose.setAttribute("aria-label", "Close window");
+
+        btnDock.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+          <path d="M6 12h12" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round"/>
+        </svg>`;
+
+        btnFocus.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+          <path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4"
+            stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>`;
+
+        btnClose.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+          <path d="M7 7l10 10M17 7L7 17" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round"/>
+        </svg>`;
+
+        controls.appendChild(btnDock);
+        controls.appendChild(btnFocus);
+        controls.appendChild(btnClose);
+
+        bar.appendChild(left);
+        bar.appendChild(controls);
+
+        btnClose.addEventListener("click", (e)=>{ e.stopPropagation(); closeWindow(appMeta.id); });
+        btnDock.addEventListener("click", (e)=>{ e.stopPropagation(); dockWindow(appMeta.id); });
+
+        btnFocus.addEventListener("click", (e)=>{
+          e.stopPropagation();
+          if (document.body.classList.contains("mobile")) return;
+
+          // Toggle focus (maximize/restore) with a remembered rect
+          const isFocused = win.dataset.focused === "1";
+          if (!isFocused){
+            win.dataset.focused = "1";
+            win.dataset.prev = JSON.stringify({
+              left: win.style.left, top: win.style.top, width: win.style.width, height: win.style.height
+            });
+            win.style.left = "12px";
+            win.style.top = "12px";
+            win.style.width = "calc(100% - 24px)";
+            win.style.height = "calc(100% - 24px)";
+          } else {
+            win.dataset.focused = "0";
+            try{
+              const prev = JSON.parse(win.dataset.prev || "{}");
+              win.style.left = prev.left || win.style.left;
+              win.style.top = prev.top || win.style.top;
+              win.style.width = prev.width || "";
+              win.style.height = prev.height || "";
+            } catch {}
+          }
+        });
+
+        // Dragging (desktop)
+        let drag = null;
+        bar.addEventListener("pointerdown", (e)=>{
+          if (document.body.classList.contains("mobile")) return;
+          if (e.target.closest(".winControls")) return;
+
+          win.classList.add("dragging");
+          drag = { ox: e.clientX - win.offsetLeft, oy: e.clientY - win.offsetTop };
+          bringToFront(win);
+          focusApp(appMeta.id);
+          bar.setPointerCapture(e.pointerId);
+        });
+        bar.addEventListener("pointerup", ()=>{
+          drag = null;
+          win.classList.remove("dragging");
+        });
+        bar.addEventListener("pointermove", (e)=>{
+          if (!drag) return;
+          const area = windowsLayer.getBoundingClientRect();
+          let x = e.clientX - drag.ox;
+          let y = e.clientY - drag.oy;
+
+          const maxX = Math.max(0, area.width - win.offsetWidth);
+          const maxY = Math.max(0, area.height - win.offsetHeight);
+
+          x = Math.max(0, Math.min(x, maxX));
+          y = Math.max(0, Math.min(y, maxY));
+
+          win.style.left = `${x}px`;
+          win.style.top = `${y}px`;
+        });
+        bar.addEventListener("pointerup", ()=>{ drag = null; });
+
+        // mount titlebar + app iframe
+        win.appendChild(bar);
+
+        const frame = document.createElement("iframe");
+        frame.className = "frame";
+        frame.setAttribute("sandbox", sandboxForApp(appMeta));
+
+        // load app via URL (src) or embedded HTML (srcdoc)
+        const launch = resolveLaunchSpec(appMeta);
+        if (launch.type === "url"){
+          frame.src = launch.url;
+        } else {
+          frame.srcdoc = launch.html;
+        }
+
+        win.appendChild(frame);
+
+        attachResizeHandles(win);
+
+        // If settings, push state after frame exists
+        if (appMeta.id === "settings") {
+          frame.addEventListener("load", () => syncSettingsIframe());
+        }
+
+        windowsLayer.appendChild(win);
+        openWindows.set(appMeta.id, win);
+
+        requestAnimationFrame(() => {
+          win.classList.add("open"); // triggers same transition as restore
+        });
+
+        return win;
+      }
+
+      function openApp(appId){
+        if (document.body.classList.contains("mobile")){
+          // Close all other windows on mobile for that single-app feel
+          for (const [id] of openWindows.entries()){
+            if (id !== appId) closeWindow(id);
+          }
+        }
+
+        let win = openWindows.get(appId);
+        if (win){
+          if (win.classList.contains("minimized")) restoreWindow(appId);
+          else { bringToFront(win); focusApp(appId); }
+          setIconActive(appId, true);
+          return;
+        }
+
+        const appMeta = findAppMeta(appId);
+        if (!appMeta) return;
+        createWindow(appMeta);
+        focusApp(appId);
+        setIconActive(appId, true);
+        if (appId === "settings") {
+          setTimeout(syncSettingsIframe, 60);
+        }
+      }
+
+      function findAppMeta(appId){
+        const bi = BUILTINS.find(a => a.id === appId);
+        if (bi){
+          const mo = decryptedConfig?.apps?.metaOverrides?.[appId] || {};
+          return {
+            id: bi.id,
+            name: mo.name || bi.name,
+            icon: mo.icon || bi.icon,
+            kind: "builtin",
+            editable: bi.editable,
+            // System apps strict by default; vortex apps want their own sandbox -> trusted.
+            sandboxMode: (bi.kind === "vortex") ? "trusted" : "strict"
+          };
+        }
+        const ua = decryptedConfig?.apps?.user?.find(a => a.id === appId);
+        if (!ua) return null;
+        return {
+          id: ua.id,
+          name: ua.name,
+          icon: ua.icon || "◆",
+          kind: "user",
+          type: ua.type || (ua.url ? "url" : "html"),
+          url: ua.url || "",
+          html: ua.html || "",
+          sandboxMode: ua.sandboxMode || "strict",
+          editable: true
+        };
+      }
+
+      function rebuildDock(){
+        dockCenter.innerHTML = "";
+        mobileIcons.innerHTML = "";
+        appGrid.innerHTML = "";
+
+        const metaO = decryptedConfig?.apps?.metaOverrides || {};
+
+        const allApps = [
+          ...BUILTINS.map(a=>({
+            id: a.id,
+            name: (metaO[a.id]?.name || a.name),
+            icon: (metaO[a.id]?.icon || a.icon),
+            kind: "builtin"
+          })),
+          ...(decryptedConfig?.apps?.user || []).map(a=>({
+            id: a.id,
+            name: a.name,
+            icon: a.icon || "◆",
+            kind: "user"
+          }))
+        ].sort((a,b)=>a.name.localeCompare(b.name));
+
+        for (const app of allApps){
+          const iconEl = document.createElement("div");
+          iconEl.className = "appIcon";
+          iconEl.dataset.app = app.id;
+          iconEl.title = app.name;
+
+          const iconStr = (app.icon || "").trim();
+          const isImg = /^data:image\//.test(iconStr) || /^blob:/.test(iconStr) || /^https?:\/\//.test(iconStr);
+
+          if (isImg){
+            const img = document.createElement("img");
+            img.className = "appIconImg";
+            img.alt = "";
+            img.src = iconStr;
+            iconEl.appendChild(img);
+          } else {
+            const iconStr = (app.icon || "").trim();
+            const isImg = /^data:image\//.test(iconStr) || /^blob:/.test(iconStr) || /^https?:\/\//.test(iconStr);
+
+            if (isImg){
+              const img = document.createElement("img");
+              img.className = "appIconImg";
+              img.alt = "";
+              img.src = iconStr;
+              iconEl.appendChild(img);
+            } else {
+              const txt = document.createElement("div");
+              txt.className = "appIconText";
+              txt.style.display = "block";
+              txt.textContent = (iconStr && iconStr.length <= 3) ? iconStr : (app.name[0] || "◆");
+              iconEl.appendChild(txt);
+            }
+          }
+
+          iconEl.addEventListener("click", ()=> openApp(app.id));
+          dockCenter.appendChild(iconEl);
+
+          const mEl = iconEl.cloneNode(true);
+          mEl.addEventListener("click", ()=>{
+            hideGrid();
+            openApp(app.id);
+          });
+          mobileIcons.appendChild(mEl);
+
+          const gItem = document.createElement("div");
+          gItem.className = "gridItem";
+          const gIcon = iconEl.cloneNode(true);
+          gIcon.style.width = "42px";
+          gIcon.style.height = "42px";
+          gIcon.classList.remove("active");
+          gIcon.addEventListener("click", ()=>{
+            hideGrid();
+            openApp(app.id);
+          });
+          const gName = document.createElement("div");
+          gName.className = "gridName";
+          gName.textContent = app.name;
+          gItem.appendChild(gIcon);
+          gItem.appendChild(gName);
+          appGrid.appendChild(gItem);
+        }
+      }
+
+      function updateClock(){
+        if (!statusDate || !statusTime) return;
+
+        const d = new Date();
+
+        const osPrefs = decryptedConfig?.os || {};
+        const clock24h = osPrefs.clock24h === true; // default false (12-hour)
+        const showSeconds = !!osPrefs.showSeconds;
+
+        const dateStr = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+        const h24 = d.getHours();
+        let h = h24;
+        let suffix = "";
+
+        if (!clock24h){
+          suffix = (h24 >= 12) ? " PM" : " AM";
+          h = h24 % 12;
+          if (h === 0) h = 12;
+        }
+
+        const hh = clock24h ? String(h).padStart(2,"0") : String(h);
+        const mm = String(d.getMinutes()).padStart(2,"0");
+        const ss = showSeconds ? (":" + String(d.getSeconds()).padStart(2,"0")) : "";
+
+        statusDate.textContent = dateStr;
+        statusTime.textContent = `${hh}:${mm}${ss}${suffix}`;
+      }
+
+      function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+      async function enterFullscreenFromGesture(){
+        try{
+          if (!document.fullscreenElement){
+            await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+          }
+        } catch {
+          // ignore (browser may block)
+        }
+      }
+
+      function shuffle(arr){
+        for (let i = arr.length - 1; i > 0; i--){
+          const j = (Math.random() * (i + 1)) | 0;
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+      }
+
+      function setBootProgress(p){
+        if (!bootBar) return;
+        const v = Math.max(0, Math.min(1, p));
+        bootBar.style.width = `${Math.round(v * 100)}%`;
+      }
+
+      function bootLogPush(text){
+        if (!bootLog) return;
+        const div = document.createElement("div");
+        div.className = "l";
+        div.textContent = text;
+
+        // dim older lines for a “terminal” feel
+        const kids = Array.from(bootLog.children);
+        kids.forEach((k, idx)=> k.classList.toggle("dim", idx < kids.length - 3));
+
+        bootLog.appendChild(div);
+        while (bootLog.children.length > 9) bootLog.removeChild(bootLog.firstChild);
+      }
+
+      async function playBootSequence(){
+        if (bootLog) bootLog.innerHTML = "";
+        setBootProgress(0);
+
+        const sess = Math.random().toString(16).slice(2, 6).toUpperCase();
+        bootLogPush(`vortex-kernel: session ${sess}`);
+        await sleep(120);
+
+        const steps = shuffle([
+          "Loading…",
+          "Initializing…",
+          "Starting…"
+
+        ]).slice(0, 7 + ((Math.random()*2)|0)); // 7–8 steps
+
+        const per = 140 + ((Math.random()*90)|0); // 140–230ms
+        for (let i=0;i<steps.length;i++){
+          bootSub.textContent = steps[i];
+          bootLogPush(steps[i]);
+          setBootProgress((i + 1) / (steps.length + 1));
+          await sleep(per);
+        }
+
+        bootSub.textContent = "Launching UI…";
+        bootLogPush("Launching UI");
+        setBootProgress(1);
+        await sleep(180);
+      }
+
+      function openIndexedDB(){
+        return new Promise((resolve, reject)=>{
+          const req = indexedDB.open(DB_NAME, 1);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+          };
+          req.onsuccess = ()=> resolve(req.result);
+          req.onerror = ()=> reject(req.error);
+        });
+      }
+
+      async function dbGet(){
+        try{
+          const db = await openIndexedDB();
+          return await new Promise((resolve)=>{
+            const tx = db.transaction(DB_STORE, "readonly");
+            const store = tx.objectStore(DB_STORE);
+            const req = store.get(DB_KEY);
+            req.onsuccess = ()=> resolve(req.result || null);
+            req.onerror = ()=> resolve(null);
+          });
+        } catch {
+          return null;
+        }
+      }
+
+      async function dbSet(value){
+        try{
+          const db = await openIndexedDB();
+          await new Promise((resolve, reject)=>{
+            const tx = db.transaction(DB_STORE, "readwrite");
+            const store = tx.objectStore(DB_STORE);
+            const req = store.put(value, DB_KEY);
+            req.onsuccess = ()=> resolve();
+            req.onerror = ()=> reject(req.error);
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      async function readStoredBlob(){
+        const fromDB = await dbGet();
+        if (fromDB) return fromDB;
+
+        try{
+          const s = localStorage.getItem(LS_FALLBACK_KEY);
+          return s ? JSON.parse(s) : null;
+        } catch {
+          return null;
+        }
+      }
+
+      async function writeStoredBlob(blob){
+        const ok = await dbSet(blob);
+        if (!ok) {
+          localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(blob));
+        } else {
+          localStorage.setItem(LS_FALLBACK_KEY, JSON.stringify(blob));
+        }
+      }
+
+      async function exportOS(){
+        const blob = await readStoredBlob();
+        if (!blob) return;
+
+        const str = JSON.stringify(blob);
+        const file = new Blob([str], { type: "application/json" });
+        const url = URL.createObjectURL(file);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "vortex.os";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        URL.revokeObjectURL(url);
+      }
+
+      function importOS(){
+        fileOS.value = "";
+        fileOS.click();
+      }
+
+      async function persistConfig(){
+        if (!decryptedConfig || !currentPassword) return;
+        const enc = await encryptConfig(decryptedConfig, currentPassword);
+        await writeStoredBlob(enc);
+      }
+
+      function settingsAppListData(){
+        const list = [];
+
+        const mo = decryptedConfig?.apps?.metaOverrides || {};
+        for (const b of BUILTINS){
+          list.push({
+            id: b.id,
+            name: (mo[b.id]?.name || b.name),
+            kind: "builtin",
+            editable: b.editable
+          });
+        }
+        for (const u of (decryptedConfig?.apps?.user || [])){
+          list.push({
+            id: u.id,
+            name: u.name,
+            kind: "user",
+            editable: true
+          });
+        }
+
+        return list.sort((a,b)=>a.name.localeCompare(b.name));
+      }
+
+      function hexToRgbCsv(hex){
+        const h = String(hex || "").replace("#","").trim();
+        const ok = /^[0-9a-fA-F]{6}$/.test(h);
+        const v = ok ? h : "2f6bff";
+        const r = parseInt(v.slice(0,2),16);
+        const g = parseInt(v.slice(2,4),16);
+        const b = parseInt(v.slice(4,6),16);
+        return `${r},${g},${b}`;
+      }
+
+      function hexToRgbObj(hex){
+        const h = String(hex||"").replace("#","").trim();
+        const v = /^[0-9a-fA-F]{6}$/.test(h) ? h : "2f6bff";
+        return {
+          r: parseInt(v.slice(0,2),16),
+          g: parseInt(v.slice(2,4),16),
+          b: parseInt(v.slice(4,6),16)
+        };
+      }
+      function rgbToHex(r,g,b){
+        const clamp8 = (n)=> Math.max(0, Math.min(255, n|0));
+        return "#" + [clamp8(r),clamp8(g),clamp8(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+      }
+      function mixHex(a, b, t){
+        const A = hexToRgbObj(a), B = hexToRgbObj(b);
+        return rgbToHex(
+          Math.round(A.r*(1-t) + B.r*t),
+          Math.round(A.g*(1-t) + B.g*t),
+          Math.round(A.b*(1-t) + B.b*t)
+        );
+      }
+      function rgba(hex, alpha){
+        const c = hexToRgbObj(hex);
+        return `rgba(${c.r},${c.g},${c.b},${alpha})`;
+      }
+      function makeWallpaperBgPreview(accentHex, themeId){
+        const id = String(themeId || "");
+        let base = "#0b1026";
+
+        let mix0 = 0.35;
+        let mix1 = 0.74;
+        let accentA = 0.34;
+        let whiteA = 0.06;
+
+        // Void theme
+        if (id === "void"){
+          mix0 = 0.46;
+          mix1 = 0.84;
+          whiteA = 0.05;
+        }
+
+        // Dark Mode
+        if (id === "dark-mode"){
+          base = "#050611";
+          mix0 = 0.68;   // was 0.62 (lighter side) -> slightly darker
+          mix1 = 0.90;   // keep dark side the same
+          accentA = 0.20;
+          whiteA = 0.04;
+        }
+
+        const wall0 = mixHex(accentHex, base, mix0);
+        const wall1 = mixHex(accentHex, base, mix1); // keep in sync with makeWallpaperBg()
+
+        return [
+          `radial-gradient(1200px 900px at 12% 10%, ${rgba(accentHex,accentA)}, transparent 60%)`,
+          `radial-gradient(900px 700px at 86% 85%, rgba(255,255,255,${whiteA}), transparent 60%)`,
+          `linear-gradient(135deg, ${wall0}, ${wall1})`
+        ].join(", ");
+      }
+      function makeWallpaperBg(accentHex, themeId){
+        const id = String(themeId || "");
+        let base = "#0b1026";
+
+        // defaults
+        let mix0 = 0.42; // lighter gradient
+        let mix1 = 0.70; // darker gradient
+        let accentA = 0.34;
+        let whiteA = 0.06;
+
+        // Void: a touch darker overall
+        if (id === "void"){
+          mix0 = 0.52;
+          mix1 = 0.86;
+          whiteA = 0.05;
+        }
+
+        // Dark Mode: darken ONLY the lighter side (mix0) a bit
+        if (id === "dark-mode"){
+          base = "#050611";
+          mix0 = 0.74;  // was 0.68 -> slightly darker light side
+          mix1 = 0.92;  // keep dark side the same
+          accentA = 0.20;
+          whiteA = 0.04;
+        }
+
+        const wall0 = mixHex(accentHex, base, mix0);
+        const wall1 = mixHex(accentHex, base, mix1);
+
+        document.documentElement.style.setProperty("--wall0", wall0);
+        document.documentElement.style.setProperty("--wall1", wall1);
+
+        return [
+          `radial-gradient(1200px 900px at 12% 10%, ${rgba(accentHex,accentA)}, transparent 60%)`,
+          `radial-gradient(900px 700px at 86% 85%, rgba(255,255,255,${whiteA}), transparent 60%)`,
+          `linear-gradient(135deg, ${wall0}, ${wall1})`
+        ].join(", ");
+      }
+
+      function settingsState(){
+        const themeId = decryptedConfig?.appearance?.themeId || "neon-blue";
+        const theme = THEME_PRESETS.find(t => t.id === themeId) || THEME_PRESETS[0];
+        return {
+          profile: decryptedConfig?.profile || { username: "Vortex User", pfpDataUrl: null },
+          appearance: decryptedConfig?.appearance || { themeId: "neon-blue" },
+
+          os: decryptedConfig?.os || { clock24h: false, showSeconds: false, searchEngine: "duckduckgo" },
+
+          themes: THEME_PRESETS.map(t => ({
+            id: t.id,
+            name: t.name,
+            bg: makeWallpaperBgPreview(t.accent || "#2f6bff", t.id)
+          })),
+          apps: settingsAppListData(),
+          accent: theme.accent || "#2f6bff",
+          accent2: theme.accent2 || theme.accent || "#4a92ff",
+          accentRgb: hexToRgbCsv(theme.accent || "#2f6bff"),
+          settingsWallpaper: makeWallpaperBgPreview(theme.accent || "#2f6bff", "dark-mode")
+        };
+      }
+
+      function postToSettings(msg){
+        const win = openWindows.get("settings");
+        if (!win) return;
+        const frame = win.querySelector("iframe");
+        frame?.contentWindow?.postMessage(msg, "*");
+      }
+
+      function syncSettingsIframe(){
+        if (!decryptedConfig) return;
+        postToSettings({ type: "vortex.settings.state", state: settingsState() });
+      }
+
+      // Parent listens to iframe events
+      window.addEventListener("message", async (event)=>{
+        const msg = event.data;
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "vortex.settings.osPref"){
+          if (!decryptedConfig) return;
+          const k = String(msg.key || "");
+          if (!k) return;
+
+          decryptedConfig.os = decryptedConfig.os || {};
+          decryptedConfig.os[k] = msg.value;
+
+          await persistConfig();
+          updateClock();
+          syncSettingsIframe();
+
+          // keep taskbar search label/placeholder in sync
+          const tsi = el("taskSearchInput");
+          const ts  = el("taskSearch");
+          if (tsi && ts){
+            const e = decryptedConfig?.os?.searchEngine || "duckduckgo";
+            const label = (String(e).toLowerCase()==="duckduckgo") ? "DuckDuckGo"
+                        : (String(e).toLowerCase()==="qwant") ? "Qwant"
+                        : (String(e).toLowerCase()==="google") ? "Google"
+                        : (String(e).toLowerCase()==="torry") ? "Torry"
+                        : "Web";
+            tsi.placeholder = `Search ${label}`;
+            ts.title = `Search ${label}`;
+          }
+
+          return;
+
+        }
+
+        if (msg.type === "vortex.settings.ready"){
+          syncSettingsIframe();
+          return;
+        }
+
+        if (msg.type === "vortex.settings.username"){
+          if (!decryptedConfig) return;
+          decryptedConfig.profile.username = (msg.value || "").trim() || "Vortex User";
+          profileName.textContent = decryptedConfig.profile.username;
+          await persistConfig();
+          syncSettingsIframe();
+          return;
+        }
+
+        if (msg.type === "vortex.settings.setTheme" && msg.themeId){
+          if (!decryptedConfig) return;
+          decryptedConfig.appearance.themeId = msg.themeId;
+          applyTheme();
+          await persistConfig();
+          syncSettingsIframe();
+          return;
+        }
+
+        if (msg.id === "btnEnterFullscreen"){
+          try{
+            if (!document.fullscreenElement){
+              await document.documentElement.requestFullscreen();
+            }
+          } catch {}
+          return;
+        }
+
+        if (msg.id === "btnExitFullscreen"){
+          try{
+            if (document.fullscreenElement){
+              await document.exitFullscreen();
+            }
+          } catch {}
+          return;
+        }
+
+        if (msg.type === "vortex.settings.click"){
+          if (msg.id === "btnPfpUpload"){
+            filePFP.value = "";
+            filePFP.click();
+            return;
+          }
+
+          if (msg.id === "btnPfpClear"){
+            decryptedConfig.profile.pfpDataUrl = null;
+            applyTheme();
+            await persistConfig();
+            syncSettingsIframe();
+            return;
+          }
+
+          if (msg.id === "btnExport"){
+            await exportOS();
+            return;
+          }
+
+          if (msg.id === "btnImport"){
+            importOS();
+            return;
+          }
+
+          if (msg.id === "btnResetVault"){
+            const vaultWin = openWindows.get("vortex-vault");
+            if (vaultWin){
+              const f = vaultWin.querySelector("iframe");
+              if (f && f.contentWindow){
+                f.contentWindow.postMessage({ type: "vortex.vault.resetToStock" }, "*");
+              }
+            }
+            return;
+          }
+
+          if (msg.id === "btnAddApp"){
+            openAddAppModal();
+            return;
+          }
+        }
+
+        if (msg.type === "vortex.os.editApp" && msg.appId){
+          openEditAppModal(msg.appId);
+          return;
+        }
+
+        if (msg.type === "vortex.os.deleteApp" && msg.appId){
+          await deleteUserApp(msg.appId);
+          return;
+        }
+
+        // Optional: storage bridge for strict user apps (postMessage API)
+        // User apps (strict sandbox) can do:
+        // parent.postMessage({type:"vortex.bridge.set", appId, key, value}, "*")
+        // parent.postMessage({type:"vortex.bridge.get", appId, key}, "*")
+        if (msg.type === "vortex.bridge.set"){
+          if (!decryptedConfig) return;
+          const { appId, key, value } = msg;
+          if (!appId || !key) return;
+          const ua = decryptedConfig.apps.user.find(a => a.id === appId);
+          if (!ua) return;
+          ua.kv = ua.kv || {};
+          ua.kv[key] = value;
+          await persistConfig();
+          return;
+        }
+        if (msg.type === "vortex.bridge.get"){
+          const { appId, key, nonce } = msg;
+          if (!appId || !key) return;
+          const ua = decryptedConfig?.apps?.user?.find(a => a.id === appId);
+          const val = ua?.kv ? ua.kv[key] : null;
+          event.source?.postMessage({ type: "vortex.bridge.get.result", appId, key, value: val ?? null, nonce: nonce ?? null }, "*");
+          return;
+        }
+      });
+
+      function openAddAppModal(){
+        const wrap = document.createElement("div");
+
+        const err = document.createElement("div");
+        err.className = "error";
+        err.style.display = "none";
+
+        // Name
+        const nameField = document.createElement("div");
+        nameField.className = "field";
+        const nameLabel = document.createElement("label");
+        nameLabel.textContent = "App name";
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.placeholder = "My App";
+        nameField.appendChild(nameLabel);
+        nameField.appendChild(nameInput);
+
+        // Icon (text + optional image upload)
+        const iconField = document.createElement("div");
+        iconField.className = "field";
+        const iconLabel = document.createElement("label");
+        iconLabel.textContent = "Icon (upload PNG/SVG/WebP or 1–3 chars fallback)";
+        const iconInput = document.createElement("input");
+        iconInput.type = "text";
+        iconInput.placeholder = "◆";
+        iconField.appendChild(iconLabel);
+        iconField.appendChild(iconInput);
+
+        let iconDataUrl = "";
+
+        const iconFile = document.createElement("input");
+        iconFile.type = "file";
+        iconFile.accept = "image/png,image/webp,image/svg+xml";
+        iconFile.style.display = "none";
+
+        const iconPreview = document.createElement("div");
+        iconPreview.className = "pill";
+        iconPreview.style.display = "inline-flex";
+        iconPreview.style.alignItems = "center";
+        iconPreview.style.gap = "8px";
+        iconPreview.style.padding = "6px 10px";
+
+        const btnIconUpload = document.createElement("button");
+        btnIconUpload.className = "btn";
+        btnIconUpload.type = "button";
+        btnIconUpload.textContent = "Upload icon";
+
+        const btnIconClear = document.createElement("button");
+        btnIconClear.className = "btn btnGhost";
+        btnIconClear.type = "button";
+        btnIconClear.textContent = "Clear image";
+
+        function renderIconPreview(){
+          iconPreview.innerHTML = "";
+          if (iconDataUrl){
+            const img = document.createElement("img");
+            img.src = iconDataUrl;
+            img.alt = "";
+            img.style.width = "18px";
+            img.style.height = "18px";
+            img.style.objectFit = "contain";
+            iconPreview.appendChild(img);
+
+            const t = document.createElement("span");
+            t.textContent = "Image icon";
+            t.style.color = "var(--muted)";
+            t.style.fontSize = "12px";
+            iconPreview.appendChild(t);
+          } else {
+            const t = document.createElement("span");
+            t.textContent = "Using text fallback";
+            t.style.color = "var(--muted)";
+            t.style.fontSize = "12px";
+            iconPreview.appendChild(t);
+          }
+        }
+        renderIconPreview();
+
+        btnIconUpload.addEventListener("click", ()=>{
+          err.style.display = "none";
+          iconFile.value = "";
+          iconFile.click();
+        });
+
+        btnIconClear.addEventListener("click", ()=>{
+          iconDataUrl = "";
+          renderIconPreview();
+        });
+
+        iconFile.addEventListener("change", async ()=>{
+          err.style.display = "none";
+          const f = iconFile.files && iconFile.files[0];
+          if (!f) return;
+
+          const dataUrl = await new Promise((resolve)=>{
+            const r = new FileReader();
+            r.onload = ()=> resolve(String(r.result || ""));
+            r.readAsDataURL(f);
+          });
+
+          // Enforce 256×256 max for bitmap icons (PNG/WebP)
+          if (/^data:image\/(png|webp)/.test(dataUrl)){
+            const ok = await new Promise((resolve)=>{
+              const img = new Image();
+              img.onload = ()=> resolve(img.width <= 256 && img.height <= 256);
+              img.onerror = ()=> resolve(false);
+              img.src = dataUrl;
+            });
+            if (!ok){
+              err.textContent = "Icon must be at most 256×256 pixels.";
+              err.style.display = "block";
+              return;
+            }
+          }
+
+          iconDataUrl = dataUrl;
+          renderIconPreview();
+        });
+
+        const iconRow = document.createElement("div");
+        iconRow.className = "row";
+        iconRow.appendChild(btnIconUpload);
+        iconRow.appendChild(btnIconClear);
+        iconRow.appendChild(iconPreview);
+
+        iconField.appendChild(iconRow);
+        iconField.appendChild(iconFile);
+
+        // Type: HTML vs URL
+        const typeField = document.createElement("div");
+        typeField.className = "field";
+        const typeLabel = document.createElement("label");
+        typeLabel.textContent = "App type";
+        const typeSelect = document.createElement("select");
+        typeSelect.innerHTML = `
+          <option value="html" selected>Inline HTML (single-file)</option>
+          <option value="url">URL (hosted page)</option>
+        `;
+        typeField.appendChild(typeLabel);
+        typeField.appendChild(typeSelect);
+
+        // URL field (only shown for type=url)
+        const urlField = document.createElement("div");
+        urlField.className = "field";
+        const urlLabel = document.createElement("label");
+        urlLabel.textContent = "App URL";
+        const urlInput = document.createElement("input");
+        urlInput.type = "text";
+        urlInput.placeholder = "https://example.com/app/";
+        urlField.appendChild(urlLabel);
+        urlField.appendChild(urlInput);
+
+        // Sandbox
+        const sandboxField = document.createElement("div");
+        sandboxField.className = "field";
+        const sandboxLabel = document.createElement("label");
+        sandboxLabel.textContent = "Sandbox mode";
+        const sandboxSelect = document.createElement("select");
+        sandboxSelect.innerHTML = `
+          <option value="strict" selected>Strict (recommended)</option>
+          <option value="trusted">Trusted (less safe)</option>
+        `;
+        const sandboxHint = document.createElement("div");
+        sandboxHint.className = "hint";
+        sandboxHint.textContent = "Strict isolates the app from the OS. Trusted allows same-origin storage and deeper browser capabilities.";
+        sandboxField.appendChild(sandboxLabel);
+        sandboxField.appendChild(sandboxSelect);
+        sandboxField.appendChild(sandboxHint);
+
+        // HTML field (only shown for type=html)
+        const htmlField = document.createElement("div");
+        htmlField.className = "field";
+        const htmlLabel = document.createElement("label");
+        htmlLabel.textContent = "App HTML";
+        const htmlArea = document.createElement("textarea");
+        htmlArea.placeholder = "<!doctype html>...";
+        htmlField.appendChild(htmlLabel);
+        htmlField.appendChild(htmlArea);
+
+        function renderType(){
+          const t = typeSelect.value;
+          urlField.style.display = (t === "url") ? "" : "none";
+          htmlField.style.display = (t === "html") ? "" : "none";
+        }
+        typeSelect.addEventListener("change", renderType);
+        renderType();
+
+        wrap.appendChild(nameField);
+        wrap.appendChild(iconField);
+        wrap.appendChild(typeField);
+        wrap.appendChild(urlField);
+        wrap.appendChild(sandboxField);
+        wrap.appendChild(htmlField);
+        wrap.appendChild(err);
+
+        const btnCancel = document.createElement("button");
+        btnCancel.className = "btn";
+        btnCancel.textContent = "Cancel";
+        btnCancel.addEventListener("click", closeModal);
+
+        const btnSave = document.createElement("button");
+        btnSave.className = "btn btnPrimary";
+        btnSave.textContent = "Install";
+        btnSave.addEventListener("click", async ()=>{
+          err.style.display = "none";
+
+          const name = (nameInput.value || "").trim();
+          const iconText = (iconInput.value || "").trim() || "◆";
+          const icon = (iconDataUrl && iconDataUrl.trim()) ? iconDataUrl : iconText.slice(0,3);
+
+          const type = typeSelect.value;
+          const url = (urlInput.value || "").trim();
+          const html = (htmlArea.value || "").trim();
+          const mode = sandboxSelect.value;
+
+          if (!name){
+            err.textContent = "App name is required.";
+            err.style.display = "block";
+            return;
+          }
+          if ((decryptedConfig.apps.user || []).length >= MAX_USER_APPS){
+            err.textContent = "App quantity limit reached.";
+            err.style.display = "block";
+            return;
+          }
+
+          if (type === "url"){
+            if (!url){
+              err.textContent = "App URL is required.";
+              err.style.display = "block";
+              return;
+            }
+          } else {
+            if (!html){
+              err.textContent = "App HTML is required.";
+              err.style.display = "block";
+              return;
+            }
+          }
+
+          const id = "user-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+          decryptedConfig.apps.user.push({
+            id,
+            name,
+            icon,
+            type,
+            url: (type === "url") ? url : "",
+            html: (type === "html") ? html : "",
+            sandboxMode: mode,
+            kv: {}
+          });
+
+          await persistConfig();
+          rebuildDock();
+          syncSettingsIframe();
+          closeModal();
+        });
+
+        openModal("Add app", wrap, [btnCancel, btnSave]);
+      }
+
+      function openAddAppModal(){
+        const wrap = document.createElement("div");
+
+        const err = document.createElement("div");
+        err.className = "error";
+        err.style.display = "none";
+
+        // Name
+        const nameField = document.createElement("div");
+        nameField.className = "field";
+        const nameLabel = document.createElement("label");
+        nameLabel.textContent = "App name";
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.placeholder = "My App";
+        nameField.appendChild(nameLabel);
+        nameField.appendChild(nameInput);
+
+        // Icon (text + optional image upload)
+        const iconField = document.createElement("div");
+        iconField.className = "field";
+        const iconLabel = document.createElement("label");
+        iconLabel.textContent = "Icon (upload PNG/SVG/WebP or 1–3 chars fallback)";
+        const iconInput = document.createElement("input");
+        iconInput.type = "text";
+        iconInput.placeholder = "◆";
+        iconField.appendChild(iconLabel);
+        iconField.appendChild(iconInput);
+
+        let iconDataUrl = "";
+
+        const iconFile = document.createElement("input");
+        iconFile.type = "file";
+        iconFile.accept = "image/png,image/webp,image/svg+xml";
+        iconFile.style.display = "none";
+
+        const iconPreview = document.createElement("div");
+        iconPreview.className = "pill";
+        iconPreview.style.display = "inline-flex";
+        iconPreview.style.alignItems = "center";
+        iconPreview.style.gap = "8px";
+        iconPreview.style.padding = "6px 10px";
+
+        const btnIconUpload = document.createElement("button");
+        btnIconUpload.className = "btn";
+        btnIconUpload.type = "button";
+        btnIconUpload.textContent = "Upload icon";
+
+        const btnIconClear = document.createElement("button");
+        btnIconClear.className = "btn btnGhost";
+        btnIconClear.type = "button";
+        btnIconClear.textContent = "Clear image";
+
+        function renderIconPreview(){
+          iconPreview.innerHTML = "";
+          if (iconDataUrl){
+            const img = document.createElement("img");
+            img.src = iconDataUrl;
+            img.alt = "";
+            img.style.width = "18px";
+            img.style.height = "18px";
+            img.style.objectFit = "contain";
+            iconPreview.appendChild(img);
+
+            const t = document.createElement("span");
+            t.textContent = "Image icon";
+            t.style.color = "var(--muted)";
+            t.style.fontSize = "12px";
+            iconPreview.appendChild(t);
+          } else {
+            const t = document.createElement("span");
+            t.textContent = "Using text fallback";
+            t.style.color = "var(--muted)";
+            t.style.fontSize = "12px";
+            iconPreview.appendChild(t);
+          }
+        }
+        renderIconPreview();
+
+        btnIconUpload.addEventListener("click", ()=>{
+          err.style.display = "none";
+          iconFile.value = "";
+          iconFile.click();
+        });
+
+        btnIconClear.addEventListener("click", ()=>{
+          iconDataUrl = "";
+          renderIconPreview();
+        });
+
+        iconFile.addEventListener("change", async ()=>{
+          err.style.display = "none";
+          const f = iconFile.files && iconFile.files[0];
+          if (!f) return;
+
+          const dataUrl = await new Promise((resolve)=>{
+            const r = new FileReader();
+            r.onload = ()=> resolve(String(r.result || ""));
+            r.readAsDataURL(f);
+          });
+
+          // Enforce 256×256 max for bitmap icons (PNG/WebP)
+          if (/^data:image\/(png|webp)/.test(dataUrl)){
+            const ok = await new Promise((resolve)=>{
+              const img = new Image();
+              img.onload = ()=> resolve(img.width <= 256 && img.height <= 256);
+              img.onerror = ()=> resolve(false);
+              img.src = dataUrl;
+            });
+            if (!ok){
+              err.textContent = "Icon must be at most 256×256 pixels.";
+              err.style.display = "block";
+              return;
+            }
+          }
+
+          iconDataUrl = dataUrl;
+          renderIconPreview();
+        });
+
+        const iconRow = document.createElement("div");
+        iconRow.className = "row";
+        iconRow.appendChild(btnIconUpload);
+        iconRow.appendChild(btnIconClear);
+        iconRow.appendChild(iconPreview);
+
+        iconField.appendChild(iconRow);
+        iconField.appendChild(iconFile);
+
+        // Type: HTML vs URL
+        const typeField = document.createElement("div");
+        typeField.className = "field";
+        const typeLabel = document.createElement("label");
+        typeLabel.textContent = "App type";
+        const typeSelect = document.createElement("select");
+        typeSelect.innerHTML = `
+          <option value="html" selected>Inline HTML (single-file)</option>
+          <option value="url">URL (hosted page)</option>
+        `;
+        typeField.appendChild(typeLabel);
+        typeField.appendChild(typeSelect);
+
+        // URL field (only shown for type=url)
+        const urlField = document.createElement("div");
+        urlField.className = "field";
+        const urlLabel = document.createElement("label");
+        urlLabel.textContent = "App URL";
+        const urlInput = document.createElement("input");
+        urlInput.type = "text";
+        urlInput.placeholder = "https://example.com/app/";
+        urlField.appendChild(urlLabel);
+        urlField.appendChild(urlInput);
+
+        // Sandbox
+        const sandboxField = document.createElement("div");
+        sandboxField.className = "field";
+        const sandboxLabel = document.createElement("label");
+        sandboxLabel.textContent = "Sandbox mode";
+        const sandboxSelect = document.createElement("select");
+        sandboxSelect.innerHTML = `
+          <option value="strict" selected>Strict (recommended)</option>
+          <option value="trusted">Trusted (less safe)</option>
+        `;
+        const sandboxHint = document.createElement("div");
+        sandboxHint.className = "hint";
+        sandboxHint.textContent = "Strict isolates the app from the OS. Trusted allows same-origin storage and deeper browser capabilities.";
+        sandboxField.appendChild(sandboxLabel);
+        sandboxField.appendChild(sandboxSelect);
+        sandboxField.appendChild(sandboxHint);
+
+        // HTML field (only shown for type=html)
+        const htmlField = document.createElement("div");
+        htmlField.className = "field";
+        const htmlLabel = document.createElement("label");
+        htmlLabel.textContent = "App HTML";
+        const htmlArea = document.createElement("textarea");
+        htmlArea.placeholder = "<!doctype html>...";
+        htmlField.appendChild(htmlLabel);
+        htmlField.appendChild(htmlArea);
+
+        function renderType(){
+          const t = typeSelect.value;
+          urlField.style.display = (t === "url") ? "" : "none";
+          htmlField.style.display = (t === "html") ? "" : "none";
+        }
+        typeSelect.addEventListener("change", renderType);
+        renderType();
+
+        wrap.appendChild(nameField);
+        wrap.appendChild(iconField);
+        wrap.appendChild(typeField);
+        wrap.appendChild(urlField);
+        wrap.appendChild(sandboxField);
+        wrap.appendChild(htmlField);
+        wrap.appendChild(err);
+
+        const btnCancel = document.createElement("button");
+        btnCancel.className = "btn";
+        btnCancel.textContent = "Cancel";
+        btnCancel.addEventListener("click", closeModal);
+
+        const btnSave = document.createElement("button");
+        btnSave.className = "btn btnPrimary";
+        btnSave.textContent = "Install";
+        btnSave.addEventListener("click", async ()=>{
+          err.style.display = "none";
+
+          const name = (nameInput.value || "").trim();
+          const iconText = (iconInput.value || "").trim() || "◆";
+          const icon = (iconDataUrl && iconDataUrl.trim()) ? iconDataUrl : iconText.slice(0,3);
+
+          const type = typeSelect.value;
+          const url = (urlInput.value || "").trim();
+          const html = (htmlArea.value || "").trim();
+          const mode = sandboxSelect.value;
+
+          if (!name){
+            err.textContent = "App name is required.";
+            err.style.display = "block";
+            return;
+          }
+          if ((decryptedConfig.apps.user || []).length >= MAX_USER_APPS){
+            err.textContent = "App quantity limit reached.";
+            err.style.display = "block";
+            return;
+          }
+
+          if (type === "url"){
+            if (!url){
+              err.textContent = "App URL is required.";
+              err.style.display = "block";
+              return;
+            }
+          } else {
+            if (!html){
+              err.textContent = "App HTML is required.";
+              err.style.display = "block";
+              return;
+            }
+          }
+
+          const id = "user-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+          decryptedConfig.apps.user.push({
+            id,
+            name,
+            icon,
+            type,
+            url: (type === "url") ? url : "",
+            html: (type === "html") ? html : "",
+            sandboxMode: mode,
+            kv: {}
+          });
+
+          await persistConfig();
+          rebuildDock();
+          syncSettingsIframe();
+          closeModal();
+        });
+
+        openModal("Add app", wrap, [btnCancel, btnSave]);
+      }
+
+      function openEditAppModal(appId){
+        const bi = BUILTINS.find(a => a.id === appId);
+        const isBuiltin = !!bi;
+
+        let appName = "";
+        let icon = "";
+        let html = "";
+        let sandboxMode = "strict";
+
+        if (isBuiltin){
+          if (!bi.editable) return;
+          const mo = decryptedConfig?.apps?.metaOverrides?.[appId] || {};
+          appName = mo.name || bi.name;
+          icon = mo.icon || bi.icon;
+          html = getBuiltinHtml(appId);
+        } else {
+          const ua = decryptedConfig.apps.user.find(a => a.id === appId);
+          if (!ua) return;
+          appName = ua.name;
+          icon = ua.icon || "◆";
+          html = ua.html || "";
+          sandboxMode = ua.sandboxMode || "strict";
+        }
+
+        const wrap = document.createElement("div");
+
+        const nameField = document.createElement("div");
+        nameField.className = "field";
+        const nameLabel = document.createElement("label");
+        nameLabel.textContent = "App name";
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.value = appName;
+        nameField.appendChild(nameLabel);
+        nameField.appendChild(nameInput);
+
+        const iconField = document.createElement("div");
+        iconField.className = "field";
+        const iconLabel = document.createElement("label");
+        iconLabel.textContent = "Icon (upload PNG/SVG/WebP or 1–3 chars fallback)";
+
+        const iconInput = document.createElement("input");
+        iconInput.type = "text";
+
+        // If existing icon is an image data URL, use it as primary and keep text as fallback
+        let iconDataUrl = "";
+        const iconStr = (icon || "").trim();
+        const isImg = /^data:image\//.test(iconStr) || /^blob:/.test(iconStr);
+
+        if (isImg){
+          iconDataUrl = iconStr;
+          iconInput.value = ""; // fallback text optional
+        } else {
+          iconDataUrl = "";
+          iconInput.value = iconStr;
+        }
+
+        const iconFile = document.createElement("input");
+        iconFile.type = "file";
+        iconFile.accept = "image/png,image/webp,image/svg+xml";
+        iconFile.style.display = "none";
+
+        const iconPreview = document.createElement("div");
+        iconPreview.className = "pill";
+        iconPreview.style.display = "inline-flex";
+        iconPreview.style.alignItems = "center";
+        iconPreview.style.gap = "8px";
+        iconPreview.style.padding = "6px 10px";
+
+        const btnIconUpload = document.createElement("button");
+        btnIconUpload.className = "btn";
+        btnIconUpload.type = "button";
+        btnIconUpload.textContent = "Upload icon";
+
+        const btnIconClear = document.createElement("button");
+        btnIconClear.className = "btn btnGhost";
+        btnIconClear.type = "button";
+        btnIconClear.textContent = "Clear image";
+
+        function renderIconPreview(){
+          iconPreview.innerHTML = "";
+          if (iconDataUrl){
+            const img = document.createElement("img");
+            img.src = iconDataUrl;
+            img.alt = "";
+            img.style.width = "18px";
+            img.style.height = "18px";
+            img.style.objectFit = "contain";
+            iconPreview.appendChild(img);
+
+            const t = document.createElement("span");
+            t.textContent = "Image icon";
+            t.style.color = "var(--muted)";
+            t.style.fontSize = "12px";
+            iconPreview.appendChild(t);
+          } else {
+            const t = document.createElement("span");
+            t.textContent = "Using text fallback";
+            t.style.color = "var(--muted)";
+            t.style.fontSize = "12px";
+            iconPreview.appendChild(t);
+          }
+        }
+        renderIconPreview();
+
+        btnIconUpload.addEventListener("click", ()=>{
+          err.style.display = "none";
+          iconFile.value = "";
+          iconFile.click();
+        });
+
+        btnIconClear.addEventListener("click", ()=>{
+          iconDataUrl = "";
+          renderIconPreview();
+        });
+
+        iconFile.addEventListener("change", async ()=>{
+          err.style.display = "none";
+          const f = iconFile.files && iconFile.files[0];
+          if (!f) return;
+
+          const dataUrl = await new Promise((resolve)=>{
+            const r = new FileReader();
+            r.onload = ()=> resolve(String(r.result || ""));
+            r.readAsDataURL(f);
+          });
+
+          if (/^data:image\/(png|webp)/.test(dataUrl)){
+            const ok = await new Promise((resolve)=>{
+              const img = new Image();
+              img.onload = ()=> resolve(img.width <= 256 && img.height <= 256);
+              img.onerror = ()=> resolve(false);
+              img.src = dataUrl;
+            });
+            if (!ok){
+              err.textContent = "Icon must be at most 256×256 pixels.";
+              err.style.display = "block";
+              return;
+            }
+          }
+
+          iconDataUrl = dataUrl;
+          renderIconPreview();
+        });
+
+        const iconRow = document.createElement("div");
+        iconRow.className = "row";
+        iconRow.appendChild(btnIconUpload);
+        iconRow.appendChild(btnIconClear);
+        iconRow.appendChild(iconPreview);
+
+        iconField.appendChild(iconLabel);
+        iconField.appendChild(iconInput);
+        iconField.appendChild(iconRow);
+        iconField.appendChild(iconFile);
+
+        const htmlField = document.createElement("div");
+        htmlField.className = "field";
+        const htmlLabel = document.createElement("label");
+        htmlLabel.textContent = "App HTML";
+        const htmlArea = document.createElement("textarea");
+        htmlArea.value = html;
+        htmlField.appendChild(htmlLabel);
+        htmlField.appendChild(htmlArea);
+
+        let sandboxField = null;
+        let sandboxSelect = null;
+        if (!isBuiltin){
+          sandboxField = document.createElement("div");
+          sandboxField.className = "field";
+          const sLabel = document.createElement("label");
+          sLabel.textContent = "Sandbox mode";
+          sandboxSelect = document.createElement("select");
+          sandboxSelect.innerHTML = `
+            <option value="strict">Strict (recommended)</option>
+            <option value="trusted">Trusted (less safe)</option>
+          `;
+          sandboxSelect.value = sandboxMode;
+          const sHint = document.createElement("div");
+          sHint.className = "hint";
+          sHint.textContent = "Strict isolates the app from the OS. Trusted allows same-origin storage and deeper browser capabilities.";
+          sandboxField.appendChild(sLabel);
+          sandboxField.appendChild(sandboxSelect);
+          sandboxField.appendChild(sHint);
+        }
+
+        const err = document.createElement("div");
+        err.className = "error";
+        err.style.display = "none";
+
+        wrap.appendChild(nameField);
+        wrap.appendChild(iconField);
+        if (sandboxField) wrap.appendChild(sandboxField);
+        wrap.appendChild(htmlField);
+        wrap.appendChild(err);
+
+        const btnCancel = document.createElement("button");
+        btnCancel.className = "btn";
+        btnCancel.textContent = "Cancel";
+        btnCancel.addEventListener("click", closeModal);
+
+        const btnSave = document.createElement("button");
+        btnSave.className = "btn btnPrimary";
+        btnSave.textContent = "Save";
+        btnSave.addEventListener("click", async ()=>{
+          err.style.display = "none";
+          const newName = (nameInput.value || "").trim();
+          const iconText = (iconInput.value || "").trim() || "◆";
+          const newIcon = (iconDataUrl && iconDataUrl.trim()) ? iconDataUrl : iconText.slice(0,3);
+          const newHtml = (htmlArea.value || "").trim();
+
+          if (!newName){
+            err.textContent = "App name is required.";
+            err.style.display = "block";
+            return;
+          }
+          if (!newHtml){
+            err.textContent = "App HTML is required.";
+            err.style.display = "block";
+            return;
+          }
+
+          if (isBuiltin){
+            decryptedConfig.apps.overrides[appId] = newHtml;
+
+            decryptedConfig.apps.metaOverrides = decryptedConfig.apps.metaOverrides || {};
+            decryptedConfig.apps.metaOverrides[appId] = { name: newName, icon: newIcon };
+          } else {
+            const ua = decryptedConfig.apps.user.find(a => a.id === appId);
+            if (!ua) return;
+            ua.name = newName;
+            ua.icon = newIcon;
+            ua.html = newHtml;
+            ua.sandboxMode = sandboxSelect ? sandboxSelect.value : (ua.sandboxMode || "strict");
+          }
+
+          await persistConfig();
+
+          // If window is open, refresh it by closing and reopening for clean state.
+          const wasOpen = openWindows.has(appId);
+          if (wasOpen) closeWindow(appId);
+
+          rebuildDock();
+          syncSettingsIframe();
+          closeModal();
+
+          if (wasOpen) setTimeout(()=>openApp(appId), 80);
+        });
+
+        openModal("Edit app", wrap, [btnCancel, btnSave]);
+      }
+
+      async function deleteUserApp(appId){
+        const ua = decryptedConfig.apps.user.find(a => a.id === appId);
+        if (!ua) return;
+
+        const ok = confirm(`Delete ${ua.name}?`);
+        if (!ok) return;
+
+        decryptedConfig.apps.user = decryptedConfig.apps.user.filter(a => a.id !== appId);
+        await persistConfig();
+
+        if (openWindows.has(appId)) closeWindow(appId);
+
+        rebuildDock();
+        syncSettingsIframe();
+      }
+
+      function wireUI(){
+        const sd = el("statusDate");
+        const st = el("statusTime");
+
+        if (sd){
+          sd.addEventListener("click", ()=> openApp("calendar"));
+          sd.addEventListener("keydown", (e)=>{ if (e.key === "Enter") openApp("calendar"); });
+        }
+        if (st){
+          st.addEventListener("click", ()=> openApp("clock"));
+          st.addEventListener("keydown", (e)=>{ if (e.key === "Enter") openApp("clock"); });
+        }
+
+        el("btnSetupNew").addEventListener("click", ()=> setScreen("setup"));
+        el("btnSetupRestore").addEventListener("click", ()=> importOS());
+
+        el("btnReturnImport").addEventListener("click", ()=> importOS());
+        el("btnReturnUnlock").addEventListener("click", unlockReturning);
+
+        el("btnCreateOS").addEventListener("click", createNewOS);
+
+        el("btnUnlock").addEventListener("click", unlockImported);
+
+        function bindEnterSubmit(inputId, buttonId){
+          const inp = el(inputId);
+          const btn = el(buttonId);
+          if (!inp || !btn) return;
+          inp.addEventListener("keydown", (e)=>{
+            if (e.key === "Enter"){
+              e.preventDefault();
+              btn.click();
+            }
+          });
+        }
+
+        bindEnterSubmit("returnPw", "btnReturnUnlock");
+        bindEnterSubmit("unlockPw", "btnUnlock");
+        bindEnterSubmit("setupPw", "btnCreateOS");
+        bindEnterSubmit("setupPw2", "btnCreateOS");
+
+        const btnOpenSettings = el("btnOpenSettings");
+        if (btnOpenSettings) btnOpenSettings.addEventListener("click", ()=> openApp("settings"));
+
+        profileChip.addEventListener("click", ()=> openApp("settings"));
+
+        const taskSearch = el("taskSearch");
+        const taskSearchInput = el("taskSearchInput");
+        const searchHint = el("searchHint");
+
+        let hintTimer = null;
+        let shiftHeld = false;
+
+        const engineLabel = (id)=>{
+          const e = String(id || "duckduckgo").toLowerCase();
+          if (e === "duckduckgo") return "DuckDuckGo";
+          if (e === "qwant") return "Qwant";
+          if (e === "google") return "Google";
+          if (e === "torry") return "Torry";
+          return "Web";
+        };
+
+        const applySearchPlaceholder = ()=>{
+          if (!taskSearchInput || !taskSearch) return;
+          const engine = decryptedConfig?.os?.searchEngine || "duckduckgo";
+          const label = shiftHeld ? "Torry" : engineLabel(engine);
+          taskSearchInput.placeholder = `Search ${label}`;
+          taskSearch.title = `Search ${label}`;
+        };
+
+        const hideHint = ()=>{
+          if (!searchHint) return;
+          searchHint.classList.remove("show");
+        };
+
+        const armHint = ()=>{
+          if (hintTimer) clearTimeout(hintTimer);
+          hideHint();
+          if (!taskSearchInput) return;
+
+          const hasText = (taskSearchInput.value || "").trim().length > 0;
+          const focused = document.activeElement === taskSearchInput;
+
+          if (!hasText || !focused) return;
+
+          hintTimer = setTimeout(()=>{
+            const stillHasText = (taskSearchInput.value || "").trim().length > 0;
+            const stillFocused = document.activeElement === taskSearchInput;
+            if (stillHasText && stillFocused && searchHint){
+              searchHint.classList.add("show");
+            }
+          }, 4000);
+        };
+
+        if (taskSearch && taskSearchInput){
+          taskSearch.addEventListener("click", ()=> taskSearchInput.focus());
+
+          taskSearchInput.addEventListener("focus", ()=>{
+            applySearchPlaceholder();
+            armHint();
+          });
+
+          taskSearchInput.addEventListener("blur", ()=>{
+            if (hintTimer) clearTimeout(hintTimer);
+            hideHint();
+            shiftHeld = false;
+            applySearchPlaceholder();
+          });
+
+          taskSearchInput.addEventListener("input", ()=>{
+            armHint();
+          });
+
+          taskSearchInput.addEventListener("keydown", (e)=>{
+            if (e.key === "Shift"){
+              shiftHeld = true;
+              applySearchPlaceholder();
+              return;
+            }
+
+            if (e.key !== "Enter") return;
+
+            e.preventDefault();
+            hideHint();
+            if (hintTimer) clearTimeout(hintTimer);
+
+            const q = (taskSearchInput.value || "").trim();
+            if (!q) return;
+
+            const engine = decryptedConfig?.os?.searchEngine || "duckduckgo";
+            const url = buildSearchUrl(q, engine, !!e.shiftKey);
+            if (url) window.open(url, "_blank", "noopener,noreferrer");
+
+            taskSearchInput.value = "";
+            taskSearchInput.blur();
+          });
+
+          taskSearchInput.addEventListener("keyup", (e)=>{
+            if (e.key === "Shift"){
+              shiftHeld = false;
+              applySearchPlaceholder();
+              armHint();
+            }
+          });
+
+          // Set an initial placeholder (updates again after decrypt/theme)
+          applySearchPlaceholder();
+        }
+
+        el("homeBtn").addEventListener("click", ()=>{
+          if (gridVisible) hideGrid(); else showGrid();
+        });
+        el("btnCloseGrid").addEventListener("click", hideGrid);
+
+        el("btnModalClose").addEventListener("click", closeModal);
+        modal.addEventListener("click", (e)=>{ if (e.target === modal) closeModal(); });
+
+        fileOS.addEventListener("change", async ()=>{
+          const f = fileOS.files && fileOS.files[0];
+          if (!f) return;
+          const txt = await f.text();
+          try{
+            const blob = JSON.parse(txt);
+            await writeStoredBlob(blob);
+            setScreen("unlock");
+          } catch {
+            alert("Invalid OS file.");
+          }
+        });
+
+        filePFP.addEventListener("change", async ()=>{
+          const f = filePFP.files && filePFP.files[0];
+          if (!f || !decryptedConfig) return;
+          const reader = new FileReader();
+          reader.onload = async ()=>{
+            decryptedConfig.profile.pfpDataUrl = reader.result;
+            applyTheme();
+            await persistConfig();
+            syncSettingsIframe();
+          };
+          reader.readAsDataURL(f);
+        });
+
+        window.addEventListener("resize", setBodyMode);
+      }
+
+      async function unlockReturning(){
+        enterFullscreenFromGesture();
+        const pw = (el("returnPw").value || "").trim();
+        const err = el("returnErr");
+        err.style.display = "none";
+        if (!pw) return;
+
+        const blob = await readStoredBlob();
+        if (!blob){
+          setScreen("welcome");
+          return;
+        }
+
+        setScreen("os");
+        setBoot(true, "Welcome back", "Decrypting your OS…");
+        try{
+          const cfg = await decryptConfig(blob, pw);
+          decryptedConfig = cfg;
+          currentPassword = pw;
+          await bootIntoOS("Welcome back", "Loading apps and shell…");
+        } catch {
+          setBoot(false);
+          setScreen("return");
+          err.textContent = "Incorrect password.";
+          err.style.display = "block";
+        }
+      }
+
+      async function unlockImported(){
+        enterFullscreenFromGesture();
+        const pw = (el("unlockPw").value || "").trim();
+        const err = el("unlockErr");
+        err.style.display = "none";
+        if (!pw) return;
+
+        const blob = await readStoredBlob();
+        if (!blob){
+          setScreen("welcome");
+          return;
+        }
+
+        setScreen("os");
+        setBoot(true, "Import successful", "Decrypting your imported OS…");
+        try{
+          const cfg = await decryptConfig(blob, pw);
+          decryptedConfig = cfg;
+          currentPassword = pw;
+          await bootIntoOS("Imported", "Loading apps and shell…");
+        } catch {
+          setBoot(false);
+          setScreen("unlock");
+          err.textContent = "Incorrect password for this OS file.";
+          err.style.display = "block";
+        }
+      }
+
+      async function createNewOS(){
+        enterFullscreenFromGesture();
+        const pw = (el("setupPw").value || "").trim();
+        const pw2 = (el("setupPw2").value || "").trim();
+        const err = el("setupErr");
+        err.style.display = "none";
+
+        if (!pw || pw.length < 6){
+          err.textContent = "Password must be at least 6 characters.";
+          err.style.display = "block";
+          return;
+        }
+        if (pw !== pw2){
+          err.textContent = "Passwords do not match.";
+          err.style.display = "block";
+          return;
+        }
+
+        decryptedConfig = defaultConfig();
+        currentPassword = pw;
+
+        setScreen("os");
+        setBoot(true, "Welcome", "Creating your encrypted OS file…");
+
+        const blob = await encryptConfig(decryptedConfig, currentPassword);
+        await writeStoredBlob(blob);
+
+        await bootIntoOS("Welcome", "Loading apps and shell…");
+      }
+
+      async function bootIntoOS(titleText, subText){
+        setBoot(true, titleText, subText);
+
+        await playBootSequence();
+
+        applyTheme();
+        rebuildDock();
+
+        updateClock();
+        if (!window.__vortexClockTimer){
+          window.__vortexClockTimer = setInterval(updateClock, 1000);
+        }
+
+        setBodyMode();
+
+        // Open nothing by default; user lands on clean desktop.
+        // If you later want autostart Vault, call openApp("vortex-vault") here.
+
+        // Fade out boot overlay
+        setBoot(false);
+
+        // Ensure return/setup screens not visible
+        setScreen("os");
+      }
+
+      async function init(){
+        if (!window.crypto || !crypto.subtle){
+          alert("Vortex OS requires modern Web Crypto support.");
+          return;
+        }
+
+        wireUI();
+
+        const blob = await readStoredBlob();
+        if (!blob){
+          setScreen("welcome");
+        } else {
+          setScreen("return");
+        }
+      }
+
+      init();
+    })();
+  </script>
+</body>
+</html>
