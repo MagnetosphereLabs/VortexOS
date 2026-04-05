@@ -2513,7 +2513,8 @@
 
       let openWindows = new Map();
       let zTop = 20;
-
+      let focusedAppId = null;
+      
       let gridVisible = false;
 
       function setScreen(which){
@@ -3126,6 +3127,7 @@
       }
 
       function focusApp(appId){
+        if (!appId) return;
         if (focusedAppId && focusedAppId !== appId) setIconFocused(focusedAppId, false);
         focusedAppId = appId;
         setIconFocused(appId, true);
@@ -3138,6 +3140,7 @@
         win.classList.remove("open");
         setIconActive(appId, true); // still running
         setIconFocused(appId, false);
+        if (focusedAppId === appId) focusedAppId = null;
       }
 
       function restoreWindow(appId){
