@@ -1189,11 +1189,10 @@
           radial-gradient(1200px 900px at 12% 10%, rgba(45,140,255,0.26), transparent 60%),
           linear-gradient(180deg, #050714, #070a16 45%, #040615);
         --shadow:0 24px 70px rgba(0,0,0,0.45);
-        --r-xl:22px;
-        --r-lg:18px;
+        --r-xl:20px;
         --t:160ms;
       }
-  
+
       *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
       html,body{
         margin:0;
@@ -1203,7 +1202,7 @@
         color:var(--text);
         background:var(--wallpaper);
       }
-  
+
       body::before{
         content:"";
         position:fixed;
@@ -1211,15 +1210,15 @@
         background:linear-gradient(180deg, rgba(4,6,18,0.18), rgba(4,6,18,0.34));
         pointer-events:none;
       }
-  
+
       .app{
         height:100%;
         display:grid;
-        grid-template-rows:auto auto 1fr;
-        gap:12px;
-        padding:12px;
+        grid-template-rows:auto minmax(0,1fr);
+        gap:8px;
+        padding:8px;
       }
-  
+
       .glass{
         background:linear-gradient(135deg, rgba(255,255,255,0.06), rgba(0,0,0,0.22));
         border:1px solid rgba(255,255,255,0.08);
@@ -1227,74 +1226,55 @@
         backdrop-filter:blur(18px);
         -webkit-backdrop-filter:blur(18px);
       }
-  
-      .topbar{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:12px;
-        padding:12px 14px;
-        border-radius:var(--r-xl);
-      }
-  
-      .title{
-        margin:0;
-        font-size:15px;
-        font-weight:750;
-        letter-spacing:.01em;
-      }
-  
-      .sub{
-        margin-top:3px;
-        font-size:12px;
-        color:var(--muted);
-      }
-  
+
       .display{
         border-radius:var(--r-xl);
-        padding:14px 16px;
-        min-height:108px;
+        padding:10px 12px;
+        min-height:68px;
         display:flex;
         flex-direction:column;
         justify-content:flex-end;
-        gap:8px;
+        gap:6px;
       }
-  
+
       .expr{
-        min-height:18px;
+        min-height:16px;
         text-align:right;
         color:var(--muted);
-        font-size:13px;
+        font-size:12px;
         line-height:1.35;
-        word-break:break-all;
+        word-break:break-word;
       }
-  
+
       .result{
         text-align:right;
-        font-size:36px;
+        font-size:clamp(26px, 7vw, 36px);
         line-height:1;
         font-weight:800;
         letter-spacing:-0.03em;
-        word-break:break-all;
+        word-break:break-word;
       }
-  
+
       .pad{
         min-height:0;
         border-radius:var(--r-xl);
-        padding:12px;
+        padding:8px;
         display:grid;
         grid-template-columns:repeat(4, minmax(0, 1fr));
-        gap:10px;
+        grid-template-rows:repeat(5, minmax(0, 1fr));
+        gap:6px;
         align-content:stretch;
       }
-  
+
       .key{
-        min-height:58px;
+        min-height:0;
+        height:100%;
+        width:100%;
         border:none;
-        border-radius:18px;
-        padding:0 12px;
+        border-radius:16px;
+        padding:0 8px;
         cursor:pointer;
-        font-size:18px;
+        font-size:clamp(16px, 4vw, 18px);
         font-weight:800;
         color:var(--text);
         background:rgba(255,255,255,0.05);
@@ -1303,43 +1283,47 @@
         transition:transform var(--t), background var(--t), opacity var(--t), box-shadow var(--t);
         user-select:none;
       }
-  
+
       .key:hover{
         transform:translateY(-1px);
         background:rgba(255,255,255,0.08);
         box-shadow:0 16px 34px rgba(0,0,0,0.24);
       }
-  
+
       .key:active{
         transform:translateY(0);
         opacity:.95;
       }
-  
+
       .key.utility{
         background:rgba(255,255,255,0.045);
       }
-  
+
       .key.op{
         background:rgba(var(--accent-rgb),0.12);
         border-color:rgba(var(--accent-rgb),0.24);
       }
-  
+
       .key.eq{
         background:linear-gradient(135deg, var(--accent), var(--accent2));
         color:#08102a;
         border:none;
         box-shadow:0 18px 40px rgba(var(--accent-rgb),0.34);
       }
-  
+
       .key.zero{
         grid-column:span 2;
       }
-  
-      @media (max-width: 720px){
-        .result{ font-size:32px; }
-        .key{ min-height:54px; }
+
+      @media (max-width: 420px), (max-height: 360px){
+        .app{ padding:6px; gap:6px; }
+        .display{ padding:8px 10px; min-height:60px; }
+        .expr{ font-size:11px; }
+        .result{ font-size:clamp(22px, 8vw, 30px); }
+        .pad{ padding:6px; gap:5px; }
+        .key{ border-radius:14px; }
       }
-  
+
       @media (prefers-reduced-motion: reduce){
         *{ animation:none !important; transition:none !important; }
       }
@@ -1347,39 +1331,32 @@
   </head>
   <body>
     <div class="app">
-      <div class="topbar glass">
-        <div>
-          <div class="title">Calculator</div>
-          <div class="sub">Simple calculator</div>
-        </div>
-      </div>
-  
       <div class="display glass">
         <div class="expr" id="expr">&nbsp;</div>
         <div class="result" id="result">0</div>
       </div>
-  
+
       <div class="pad glass" id="pad">
         <button class="key utility" data-action="clear">C</button>
         <button class="key utility" data-action="backspace">⌫</button>
         <button class="key op" data-action="operator" data-value="/">÷</button>
         <button class="key op" data-action="operator" data-value="*">×</button>
-  
+
         <button class="key" data-action="digit" data-value="7">7</button>
         <button class="key" data-action="digit" data-value="8">8</button>
         <button class="key" data-action="digit" data-value="9">9</button>
         <button class="key op" data-action="operator" data-value="-">−</button>
-  
+
         <button class="key" data-action="digit" data-value="4">4</button>
         <button class="key" data-action="digit" data-value="5">5</button>
         <button class="key" data-action="digit" data-value="6">6</button>
         <button class="key op" data-action="operator" data-value="+">+</button>
-  
+
         <button class="key" data-action="digit" data-value="1">1</button>
         <button class="key" data-action="digit" data-value="2">2</button>
         <button class="key" data-action="digit" data-value="3">3</button>
         <button class="key eq" data-action="equals">=</button>
-  
+
         <button class="key zero" data-action="digit" data-value="0">0</button>
         <button class="key" data-action="dot">.</button>
       </div>
@@ -1389,20 +1366,22 @@
       (function(){
         const exprEl = document.getElementById("expr");
         const resultEl = document.getElementById("result");
-  
+
         const state = {
           current: "0",
           stored: null,
           op: null,
-          resetInput: false
+          resetInput: false,
+          exprTokens: [],
+          lastExpr: ""
         };
-  
+
         function syncTheme(){
           try{
             const p = window.parent;
             const pdoc = p && p.document;
             if (!pdoc) return;
-  
+
             const rootStyles = p.getComputedStyle(pdoc.documentElement);
             const accent = rootStyles.getPropertyValue("--accent").trim() || "#2D8CFF";
             const accent2 = rootStyles.getPropertyValue("--accent2").trim() || "#00B8FF";
@@ -1410,17 +1389,17 @@
             const text = rootStyles.getPropertyValue("--text").trim() || "rgba(250,252,255,0.95)";
             const muted = rootStyles.getPropertyValue("--muted").trim() || "rgba(175,190,235,0.78)";
             const rootBg = (pdoc.getElementById("root") && pdoc.getElementById("root").style.background) || "";
-  
+
             document.documentElement.style.setProperty("--accent", accent);
             document.documentElement.style.setProperty("--accent2", accent2);
             document.documentElement.style.setProperty("--accent-rgb", accentRgb);
             document.documentElement.style.setProperty("--text", text);
             document.documentElement.style.setProperty("--muted", muted);
-  
+
             if (rootBg) document.documentElement.style.setProperty("--wallpaper", rootBg);
           } catch {}
         }
-  
+
         function symbolFor(op){
           if (op === "/") return "÷";
           if (op === "*") return "×";
@@ -1428,16 +1407,20 @@
           if (op === "+") return "+";
           return "";
         }
-  
+
+        function isDisplayOperator(token){
+          return token === "÷" || token === "×" || token === "−" || token === "+";
+        }
+
         function formatDisplay(value){
           const num = Number(value);
           if (!Number.isFinite(num)) return "Error";
-  
+
           const abs = Math.abs(num);
           if (abs >= 1e12 || (abs > 0 && abs < 1e-9)){
             return num.toExponential(10).replace(/\.?0+e/, "e");
           }
-  
+
           let out = String(num);
           if (out.includes("e")) return out;
           if (out.includes(".")){
@@ -1445,30 +1428,58 @@
           }
           return out;
         }
-  
+
+        function getExpressionText(){
+          if (state.lastExpr) return state.lastExpr;
+
+          const parts = state.exprTokens.slice();
+
+          if (state.op !== null && !state.resetInput && state.current !== "Error"){
+            parts.push(state.current);
+          }
+
+          return parts.join(" ").trim();
+        }
+
         function update(){
-          exprEl.textContent = state.op && state.stored !== null
-            ? `${formatDisplay(state.stored)} ${symbolFor(state.op)}`
-            : "\u00A0";
+          const exprText = getExpressionText();
+          exprEl.textContent = exprText || "\u00A0";
           resultEl.textContent = state.current;
         }
-  
+
         function clearAll(){
           state.current = "0";
           state.stored = null;
           state.op = null;
           state.resetInput = false;
+          state.exprTokens = [];
+          state.lastExpr = "";
           update();
         }
-  
+
+        function beginFreshValue(nextValue){
+          if (state.current === "Error"){
+            clearAll();
+          }
+
+          if (!state.resetInput) return false;
+
+          if (state.op === null && state.stored === null){
+            state.exprTokens = [];
+            state.lastExpr = "";
+          }
+
+          state.current = nextValue;
+          state.resetInput = false;
+          return true;
+        }
+
         function inputDigit(d){
-          if (state.current === "Error" || state.resetInput){
-            state.current = d;
-            state.resetInput = false;
+          if (beginFreshValue(d)){
             update();
             return;
           }
-  
+
           if (state.current === "0"){
             state.current = d;
           } else {
@@ -1476,39 +1487,41 @@
           }
           update();
         }
-  
+
         function inputDot(){
-          if (state.current === "Error" || state.resetInput){
-            state.current = "0.";
-            state.resetInput = false;
+          if (beginFreshValue("0.")){
             update();
             return;
           }
-  
+
           if (!state.current.includes(".")){
             state.current += ".";
           }
           update();
         }
-  
+
         function backspace(){
           if (state.current === "Error"){
             clearAll();
             return;
           }
-  
+
           if (state.resetInput){
+            if (state.op === null && state.stored === null){
+              state.exprTokens = [];
+              state.lastExpr = "";
+            }
             state.current = "0";
             state.resetInput = false;
             update();
             return;
           }
-  
+
           state.current = state.current.length > 1 ? state.current.slice(0, -1) : "0";
           if (state.current === "-" || state.current === "") state.current = "0";
           update();
         }
-  
+
         function compute(a, b, op){
           if (op === "+") return a + b;
           if (op === "-") return a - b;
@@ -1519,68 +1532,120 @@
           }
           return b;
         }
-  
+
         function applyPending(){
-          if (state.op === null || state.stored === null) return;
-  
+          if (state.op === null || state.stored === null) return true;
+
           const a = Number(state.stored);
           const b = Number(state.current);
           const result = compute(a, b, state.op);
-  
+
           if (!Number.isFinite(result)){
             state.current = "Error";
             state.stored = null;
             state.op = null;
             state.resetInput = true;
+            state.exprTokens = [];
             update();
             return false;
           }
-  
+
           state.stored = result;
           state.current = formatDisplay(result);
           return true;
         }
-  
+
+        function ensureCurrentInExpr(){
+          if (state.current === "Error") return;
+
+          const parts = state.exprTokens;
+          if (!parts.length){
+            parts.push(state.current);
+            return;
+          }
+
+          const last = parts[parts.length - 1];
+          if (isDisplayOperator(last)){
+            parts.push(state.current);
+          } else {
+            parts[parts.length - 1] = state.current;
+          }
+        }
+
+        function setExprOperator(op){
+          const symbol = symbolFor(op);
+          const parts = state.exprTokens;
+          const last = parts[parts.length - 1];
+
+          if (!parts.length){
+            parts.push(state.current, symbol);
+            return;
+          }
+
+          if (isDisplayOperator(last)){
+            parts[parts.length - 1] = symbol;
+          } else {
+            parts.push(symbol);
+          }
+        }
+
         function setOperator(nextOp){
           if (state.current === "Error"){
             clearAll();
             return;
           }
-  
-          const currentValue = Number(state.current);
-  
+
+          if (state.lastExpr && state.op === null && state.stored === null){
+            state.exprTokens = [state.current];
+            state.lastExpr = "";
+          }
+
           if (state.op !== null && !state.resetInput){
+            ensureCurrentInExpr();
             const ok = applyPending();
             if (!ok) return;
           } else if (state.stored === null){
-            state.stored = currentValue;
+            state.stored = Number(state.current);
+            if (!state.exprTokens.length){
+              state.exprTokens = [state.current];
+            }
           }
-  
+
+          setExprOperator(nextOp);
           state.op = nextOp;
           state.resetInput = true;
           update();
         }
-  
+
         function equals(){
           if (state.current === "Error") return;
           if (state.op === null || state.stored === null) return;
-  
+
+          const exprParts = state.exprTokens.slice();
+          if (!state.resetInput){
+            exprParts.push(state.current);
+          }
+
+          const finalExpr = exprParts.join(" ").trim();
+
           const ok = applyPending();
           if (!ok) return;
-  
+
+          state.lastExpr = finalExpr || state.lastExpr;
           state.op = null;
           state.stored = null;
           state.resetInput = true;
+          state.exprTokens = [];
           update();
         }
-  
+
         document.getElementById("pad").addEventListener("click", (e)=>{
           const btn = e.target.closest("button");
           if (!btn) return;
-  
+
           const action = btn.dataset.action;
           const value = btn.dataset.value;
-  
+
           if (action === "digit") inputDigit(value);
           if (action === "dot") inputDot();
           if (action === "operator") setOperator(value);
@@ -1588,49 +1653,49 @@
           if (action === "clear") clearAll();
           if (action === "backspace") backspace();
         });
-  
+
         window.addEventListener("keydown", (e)=>{
           const k = e.key;
-  
+
           if (/^[0-9]$/.test(k)){
             e.preventDefault();
             inputDigit(k);
             return;
           }
-  
+
           if (k === "."){
             e.preventDefault();
             inputDot();
             return;
           }
-  
+
           if (["+","-","*","/"].includes(k)){
             e.preventDefault();
             setOperator(k);
             return;
           }
-  
+
           if (k === "Enter" || k === "="){
             e.preventDefault();
             equals();
             return;
           }
-  
+
           if (k === "Backspace"){
             e.preventDefault();
             backspace();
             return;
           }
-  
+
           if (k === "Escape"){
             e.preventDefault();
             clearAll();
           }
         });
-  
+
         syncTheme();
         update();
-  
+
         window.addEventListener("message", (e)=>{
           const msg = e.data;
           if (!msg || typeof msg !== "object") return;
@@ -3140,43 +3205,63 @@
 
         let drag = null;
         let dragRaf = 0;
-        let pendingDragEvent = null;
+        let pendingDragPoint = null;
 
         function applyDrag(){
           dragRaf = 0;
-          if (!drag || !pendingDragEvent) return;
+          if (!drag || !pendingDragPoint) return;
 
-          const e = pendingDragEvent;
           const area = windowsLayer.getBoundingClientRect();
 
-          let x = e.clientX - drag.ox;
-          let y = e.clientY - drag.oy;
+          let x = pendingDragPoint.clientX - drag.ox;
+          let y = pendingDragPoint.clientY - drag.oy;
 
           const maxX = Math.max(0, area.width - win.offsetWidth);
           const maxY = Math.max(0, area.height - win.offsetHeight);
 
-          x = Math.max(0, Math.min(x, maxX));
-          y = Math.max(0, Math.min(y, maxY));
+          x = clamp(x, 0, maxX);
+          y = clamp(y, 0, maxY);
 
-          win.style.left = `${x}px`;
-          win.style.top = `${y}px`;
+          win.style.left = px(x);
+          win.style.top = px(y);
         }
 
-        function queueDrag(e){
-          pendingDragEvent = e;
+        function queueDrag(clientX, clientY){
+          pendingDragPoint = { clientX, clientY };
           if (!dragRaf) dragRaf = requestAnimationFrame(applyDrag);
         }
 
-        function endDrag(){
+        function moveDrag(e){
+          if (!drag || e.pointerId !== drag.pid) return;
+          queueDrag(e.clientX, e.clientY);
+        }
+
+        function endDrag(e){
           if (!drag) return;
+          if (e && e.pointerId != null && e.pointerId !== drag.pid) return;
+
           if (dragRaf){
             cancelAnimationFrame(dragRaf);
             dragRaf = 0;
           }
-          pendingDragEvent = null;
+
+          pendingDragPoint = null;
+
           try{ bar.releasePointerCapture(drag.pid); } catch {}
+
+          window.removeEventListener("pointermove", moveDrag, true);
+          window.removeEventListener("pointerup", endDrag, true);
+          window.removeEventListener("pointercancel", endDrag, true);
+          window.removeEventListener("blur", endDragWindowBlur);
+
           drag = null;
           win.classList.remove("dragging");
+          document.body.style.userSelect = "";
+          document.documentElement.style.cursor = "";
+        }
+
+        function endDragWindowBlur(){
+          endDrag();
         }
 
         bar.addEventListener("pointerdown", (e)=>{
@@ -3184,24 +3269,30 @@
           if (e.target.closest(".winControls")) return;
           if (win.dataset.focused === "1") return;
 
-          win.classList.add("dragging");
           drag = {
             pid: e.pointerId,
             ox: e.clientX - win.offsetLeft,
             oy: e.clientY - win.offsetTop
           };
+
+          win.classList.add("dragging");
           bringToFront(win);
           focusApp(appMeta.id);
-          bar.setPointerCapture(e.pointerId);
+
+          document.body.style.userSelect = "none";
+          document.documentElement.style.cursor = "move";
+
+          queueDrag(e.clientX, e.clientY);
+
+          try{ bar.setPointerCapture(e.pointerId); } catch {}
+
+          window.addEventListener("pointermove", moveDrag, true);
+          window.addEventListener("pointerup", endDrag, true);
+          window.addEventListener("pointercancel", endDrag, true);
+          window.addEventListener("blur", endDragWindowBlur);
         });
 
-        bar.addEventListener("pointermove", (e)=>{
-          if (!drag) return;
-          queueDrag(e);
-        });
-
-        bar.addEventListener("pointerup", endDrag);
-        bar.addEventListener("pointercancel", endDrag);
+        bar.addEventListener("lostpointercapture", ()=> endDrag());
 
         const host = createAppHost(appMeta, launch, mode);
         win.appendChild(host);
@@ -4712,7 +4803,7 @@
 
             const engine = decryptedConfig?.os?.searchEngine || "duckduckgo";
             const url = buildSearchUrl(q, engine, !!e.shiftKey);
-            if (url) launchUrl(url, "windowed");
+            if (url) launchUrl(url, "external");
 
             taskSearchInput.value = "";
             taskSearchInput.blur();
