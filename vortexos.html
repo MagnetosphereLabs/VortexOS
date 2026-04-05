@@ -889,7 +889,7 @@
       box-shadow: 0 18px 44px rgba(0,0,0,0.48);
 
       transition: opacity var(--t-mid) var(--ease), transform var(--t-mid) var(--ease);
-      min-width: 100px;
+      min-width: 140px;
     }
     .searchHint.show{
       opacity:1;
@@ -993,28 +993,62 @@
         <div class="panelHead">
           <div class="logo">VO</div>
           <div>
-            <div class="title">Create your Vortex OS profile</div>
-            <div class="subtitle">This password encrypts your vortex.os file</div>
+            <div class="title">Set up your Vortex OS profile</div>
+            <div class="subtitle">Create your encrypted OS and choose how it should feel from the start</div>
           </div>
         </div>
-
+    
+        <div class="hint">
+          Display name, picture, and appearance are optional. You can skip them now and change them later in Settings.
+        </div>
+    
+        <div class="row" style="align-items:center; margin-top:16px;">
+          <div class="avatar" style="width:58px;height:58px;">
+            <img id="setupAvatarImg" alt="" />
+          </div>
+          <div class="row" style="margin-top:0;">
+            <button id="btnSetupPfpUpload" class="btn" type="button">Choose picture</button>
+            <button id="btnSetupPfpClear" class="btn btnGhost" type="button">Remove</button>
+          </div>
+        </div>
+    
+        <div class="field">
+          <label for="setupDisplayName">Display name</label>
+          <input id="setupDisplayName" type="text" placeholder="Vortex User" autocomplete="nickname" />
+        </div>
+    
+        <div class="field">
+          <label for="setupTheme">Appearance</label>
+          <select id="setupTheme">
+            <option value="neon-blue">Neon Blue</option>
+            <option value="neon-cyan">Neon Cyan</option>
+            <option value="neon-orange">Neon Orange</option>
+            <option value="neon-pink">Neon Pink</option>
+            <option value="neon-lime">Neon Lime</option>
+            <option value="amethyst">Amethyst</option>
+            <option value="ember">Ember</option>
+            <option value="void">Void</option>
+            <option value="dark-mode">Dark Mode</option>
+          </select>
+        </div>
+    
         <div class="field">
           <label for="setupPw">Create password</label>
           <input id="setupPw" type="password" autocomplete="new-password" />
         </div>
-
+    
         <div class="field">
           <label for="setupPw2">Confirm password</label>
           <input id="setupPw2" type="password" autocomplete="new-password" />
           <div id="setupErr" class="error"></div>
         </div>
-
+    
         <div class="row end">
-          <button id="btnCreateOS" class="btn btnPrimary">Create OS</button>
+          <button id="btnCreateOS" class="btn btnPrimary" type="button">Create OS</button>
         </div>
-
+    
         <div class="hint">
-          There is no recovery. If the password is lost, the OS file stays encrypted.
+          Your password protects the encrypted vortex.os file. If it is lost, the file cannot be recovered.
         </div>
       </div>
     </div>
@@ -1911,9 +1945,14 @@
 
       syncTheme();
       render();
-
-      let themeTimer = setInterval(syncTheme, 400);
-      window.addEventListener("beforeunload", ()=> clearInterval(themeTimer));
+      
+      window.addEventListener("message", (e)=>{
+        const msg = e.data;
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "vortex.theme.changed"){
+          syncTheme();
+        }
+      });
     })();
   </script>
 </body>
@@ -2469,6 +2508,21 @@
       const KDF_ITER = 1000000;
       const MAX_USER_APPS = 64;
 
+      let pendingSetupPfpDataUrl = null;
+      
+      function updateSetupProfilePreview(){
+        const img = el("setupAvatarImg");
+        if (!img) return;
+      
+        if (pendingSetupPfpDataUrl){
+          img.src = pendingSetupPfpDataUrl;
+          img.style.display = "block";
+        } else {
+          img.removeAttribute("src");
+          img.style.display = "none";
+        }
+      }
+      
       const OS_SCROLL_CSS = `
         :root { color-scheme: dark; }
         * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.28) rgba(0,0,0,0.28); }
@@ -2715,9 +2769,9 @@
         return {
           v: 1,
           createdAt: Date.now(),
-          profile: { username: "Awesome Person", pfpDataUrl: null },
+          profile: { username: "Vortex User", pfpDataUrl: null },
           appearance: { themeId: "neon-blue" },
-
+      
           os: {
             clock24h: false,
             showSeconds: false,
@@ -2726,27 +2780,32 @@
             appLaunchPrefs: {},
             embedFailures: []
           },
-
+      
           apps: {
             user: [],
-            overrides: {},        // HTML overrides for built-ins
-            metaOverrides: {}     // { [appId]: { name, icon } }
+            overrides: {},
+            metaOverrides: {}
           }
         };
       }
 
+      function broadcastThemeRefresh(){
+        for (const [, win] of openWindows.entries()){
+          const frame = win.querySelector("iframe");
+          frame?.contentWindow?.postMessage({ type: "vortex.theme.changed" }, "*");
+        }
+      }
+      
       function applyTheme(){
         const themeId = decryptedConfig?.appearance?.themeId || "neon-blue";
         const theme = THEME_PRESETS.find(t => t.id === themeId) || THEME_PRESETS[0];
-
+      
         document.getElementById("root").style.background = makeWallpaperBg(theme.accent || "#2f6bff", themeId);
-
-        // OS-wide accent variables
+      
         document.documentElement.style.setProperty("--accent", theme.accent || "#2f6bff");
         document.documentElement.style.setProperty("--accent2", theme.accent2 || theme.accent || "#4a92ff");
         document.documentElement.style.setProperty("--accent-rgb", hexToRgbCsv(theme.accent || "#2f6bff"));
-
-        // Profile chip text/avatar
+      
         profileName.textContent = (decryptedConfig?.profile?.username || "Vortex User").trim() || "Vortex User";
         const pfp = decryptedConfig?.profile?.pfpDataUrl;
         if (pfp){
@@ -2755,6 +2814,8 @@
         } else {
           avatarImg.style.display = "none";
         }
+      
+        broadcastThemeRefresh();
       }
 
       function openModal(title, bodyNode, actions){
@@ -2909,23 +2970,69 @@
         persistConfig();
       }
 
+      async function setAppLaunchPreference(appId, mode){
+        if (!decryptedConfig || !appId) return;
+        decryptedConfig.os = decryptedConfig.os || {};
+        decryptedConfig.os.appLaunchPrefs = decryptedConfig.os.appLaunchPrefs || {};
+        decryptedConfig.os.appLaunchPrefs[appId] = mode;
+        await persistConfig();
+        syncSettingsIframe();
+      }
+      
       function renderEmbedErrorPanel(host, appMeta, launch, reason){
         const panel = document.createElement("div");
         panel.className = "embedErrorPanel visible";
-        const isUrl = launch.type === "url";
-        const openBtn = document.createElement("button");
-        openBtn.className = "btn btnPrimary";
-        openBtn.textContent = "Open externally";
-        openBtn.addEventListener("click", ()=>{
-          if (isUrl && launch.url){
+      
+        const title = document.createElement("h3");
+        title.textContent = "This app could not open inside VortexOS";
+      
+        const body = document.createElement("p");
+        body.textContent = `${reason} Some sites block iframe embedding, so this app may need to open in a browser tab instead.`;
+      
+        const actions = document.createElement("div");
+        actions.className = "row";
+      
+        const btnOpenNow = document.createElement("button");
+        btnOpenNow.className = "btn btnPrimary";
+        btnOpenNow.textContent = "Open in browser tab";
+        btnOpenNow.addEventListener("click", ()=>{
+          if (launch.type === "url" && launch.url){
             launchUrl(launch.url, "external");
           }
           const owner = host.closest(".win");
           if (owner && owner.dataset.app) closeWindow(owner.dataset.app);
         });
-        panel.innerHTML = `<h3>Couldn't open this app inside VortexOS</h3><p>${reason}</p>`;
-        panel.appendChild(openBtn);
+        actions.appendChild(btnOpenNow);
+      
+        if (appMeta && appMeta.id && !String(appMeta.id).startsWith("external-")){
+          const btnAlways = document.createElement("button");
+          btnAlways.className = "btn";
+          btnAlways.textContent = "Always use browser tab";
+          btnAlways.addEventListener("click", async ()=>{
+            await setAppLaunchPreference(appMeta.id, "external");
+            if (launch.type === "url" && launch.url){
+              launchUrl(launch.url, "external");
+            }
+            const owner = host.closest(".win");
+            if (owner && owner.dataset.app) closeWindow(owner.dataset.app);
+          });
+          actions.appendChild(btnAlways);
+        }
+      
+        const btnClose = document.createElement("button");
+        btnClose.className = "btn btnGhost";
+        btnClose.textContent = "Close";
+        btnClose.addEventListener("click", ()=>{
+          const owner = host.closest(".win");
+          if (owner && owner.dataset.app) closeWindow(owner.dataset.app);
+        });
+        actions.appendChild(btnClose);
+      
+        panel.appendChild(title);
+        panel.appendChild(body);
+        panel.appendChild(actions);
         host.appendChild(panel);
+      
         recordEmbedFailure(appMeta, launch, reason);
       }
 
@@ -3982,12 +4089,11 @@
 
       function openAddAppModal(){
         const wrap = document.createElement("div");
-
+      
         const err = document.createElement("div");
         err.className = "error";
         err.style.display = "none";
-
-        // Name
+      
         const nameField = document.createElement("div");
         nameField.className = "field";
         const nameLabel = document.createElement("label");
@@ -3997,8 +4103,7 @@
         nameInput.placeholder = "My App";
         nameField.appendChild(nameLabel);
         nameField.appendChild(nameInput);
-
-        // Icon (text + optional image upload)
+      
         const iconField = document.createElement("div");
         iconField.className = "field";
         const iconLabel = document.createElement("label");
@@ -4008,31 +4113,31 @@
         iconInput.placeholder = "◆";
         iconField.appendChild(iconLabel);
         iconField.appendChild(iconInput);
-
+      
         let iconDataUrl = "";
-
+      
         const iconFile = document.createElement("input");
         iconFile.type = "file";
         iconFile.accept = "image/png,image/webp,image/svg+xml";
         iconFile.style.display = "none";
-
+      
         const iconPreview = document.createElement("div");
         iconPreview.className = "pill";
         iconPreview.style.display = "inline-flex";
         iconPreview.style.alignItems = "center";
         iconPreview.style.gap = "8px";
         iconPreview.style.padding = "6px 10px";
-
+      
         const btnIconUpload = document.createElement("button");
         btnIconUpload.className = "btn";
         btnIconUpload.type = "button";
         btnIconUpload.textContent = "Upload icon";
-
+      
         const btnIconClear = document.createElement("button");
         btnIconClear.className = "btn btnGhost";
         btnIconClear.type = "button";
         btnIconClear.textContent = "Clear image";
-
+      
         function renderIconPreview(){
           iconPreview.innerHTML = "";
           if (iconDataUrl){
@@ -4043,7 +4148,7 @@
             img.style.height = "18px";
             img.style.objectFit = "contain";
             iconPreview.appendChild(img);
-
+      
             const t = document.createElement("span");
             t.textContent = "Image icon";
             t.style.color = "var(--muted)";
@@ -4058,30 +4163,29 @@
           }
         }
         renderIconPreview();
-
+      
         btnIconUpload.addEventListener("click", ()=>{
           err.style.display = "none";
           iconFile.value = "";
           iconFile.click();
         });
-
+      
         btnIconClear.addEventListener("click", ()=>{
           iconDataUrl = "";
           renderIconPreview();
         });
-
+      
         iconFile.addEventListener("change", async ()=>{
           err.style.display = "none";
           const f = iconFile.files && iconFile.files[0];
           if (!f) return;
-
+      
           const dataUrl = await new Promise((resolve)=>{
             const r = new FileReader();
             r.onload = ()=> resolve(String(r.result || ""));
             r.readAsDataURL(f);
           });
-
-          // Enforce 256×256 max for bitmap icons (PNG/WebP)
+      
           if (/^data:image\/(png|webp)/.test(dataUrl)){
             const ok = await new Promise((resolve)=>{
               const img = new Image();
@@ -4095,34 +4199,35 @@
               return;
             }
           }
-
+      
           iconDataUrl = dataUrl;
           renderIconPreview();
         });
-
+      
         const iconRow = document.createElement("div");
         iconRow.className = "row";
         iconRow.appendChild(btnIconUpload);
         iconRow.appendChild(btnIconClear);
         iconRow.appendChild(iconPreview);
-
+      
         iconField.appendChild(iconRow);
         iconField.appendChild(iconFile);
-
-        // Type: HTML vs URL
+      
         const typeField = document.createElement("div");
         typeField.className = "field";
         const typeLabel = document.createElement("label");
         typeLabel.textContent = "App type";
         const typeSelect = document.createElement("select");
         typeSelect.innerHTML = `
-          <option value="html" selected>Inline HTML (single-file)</option>
-          <option value="url">URL (hosted page)</option>
+          <option value="html" selected>Portable HTML app</option>
+          <option value="url">Hosted web app</option>
         `;
         typeField.appendChild(typeLabel);
         typeField.appendChild(typeSelect);
-
-        // URL field (only shown for type=url)
+      
+        const typeHint = document.createElement("div");
+        typeHint.className = "hint";
+      
         const urlField = document.createElement("div");
         urlField.className = "field";
         const urlLabel = document.createElement("label");
@@ -4132,25 +4237,7 @@
         urlInput.placeholder = "https://example.com/app/";
         urlField.appendChild(urlLabel);
         urlField.appendChild(urlInput);
-
-        // Sandbox
-        const sandboxField = document.createElement("div");
-        sandboxField.className = "field";
-        const sandboxLabel = document.createElement("label");
-        sandboxLabel.textContent = "Sandbox mode";
-        const sandboxSelect = document.createElement("select");
-        sandboxSelect.innerHTML = `
-          <option value="strict" selected>Strict (recommended)</option>
-          <option value="trusted">Trusted (less safe)</option>
-        `;
-        const sandboxHint = document.createElement("div");
-        sandboxHint.className = "hint";
-        sandboxHint.textContent = "Strict isolates the app from the OS. Trusted allows same-origin storage and deeper browser capabilities.";
-        sandboxField.appendChild(sandboxLabel);
-        sandboxField.appendChild(sandboxSelect);
-        sandboxField.appendChild(sandboxHint);
-
-        // HTML field (only shown for type=html)
+      
         const htmlField = document.createElement("div");
         htmlField.className = "field";
         const htmlLabel = document.createElement("label");
@@ -4159,57 +4246,110 @@
         htmlArea.placeholder = "<!doctype html>...";
         htmlField.appendChild(htmlLabel);
         htmlField.appendChild(htmlArea);
-
+      
+        const launchField = document.createElement("div");
+        launchField.className = "field";
+        const launchLabel = document.createElement("label");
+        launchLabel.textContent = "Open mode";
+        const launchSelect = document.createElement("select");
+        launchSelect.innerHTML = `
+          <option value="windowed" selected>Windowed in VortexOS</option>
+          <option value="inline">Inline in VortexOS</option>
+          <option value="external">Browser tab</option>
+        `;
+        const launchHint = document.createElement("div");
+        launchHint.className = "hint";
+        launchField.appendChild(launchLabel);
+        launchField.appendChild(launchSelect);
+        launchField.appendChild(launchHint);
+      
+        const sandboxField = document.createElement("div");
+        sandboxField.className = "field";
+        const sandboxLabel = document.createElement("label");
+        sandboxLabel.textContent = "Sandbox mode";
+        const sandboxSelect = document.createElement("select");
+        sandboxSelect.innerHTML = `
+          <option value="strict" selected>Strict</option>
+          <option value="trusted">Trusted</option>
+        `;
+        const sandboxHint = document.createElement("div");
+        sandboxHint.className = "hint";
+        sandboxField.appendChild(sandboxLabel);
+        sandboxField.appendChild(sandboxSelect);
+        sandboxField.appendChild(sandboxHint);
+      
         function renderType(){
-          const t = typeSelect.value;
-          urlField.style.display = (t === "url") ? "" : "none";
-          htmlField.style.display = (t === "html") ? "" : "none";
+          const isUrl = typeSelect.value === "url";
+      
+          urlField.style.display = isUrl ? "" : "none";
+          htmlField.style.display = isUrl ? "none" : "";
+      
+          typeHint.textContent = isUrl
+            ? "Use this for self-hosted websites. Some sites block iframe embedding, so browser tab mode is sometimes the best option."
+            : "Use this for portable apps bundled directly into your encrypted VortexOS profile. Best for offline-first and self-contained apps.";
+      
+          launchHint.textContent = isUrl
+            ? "Windowed keeps the app inside VortexOS when possible. Browser tab is the most reliable option for sites that block iframe embedding."
+            : "Windowed keeps the desktop feel. Inline removes the title bar. Browser tab opens the app outside VortexOS.";
+      
+          sandboxHint.textContent = isUrl
+            ? "Strict is best for most apps and keeps them isolated. Trusted is only for apps you trust and control that need deeper browser capabilities."
+            : "Strict is best for most apps. Trusted is only for HTML apps you trust and control that need same-origin browser features.";
         }
+      
         typeSelect.addEventListener("change", renderType);
         renderType();
-
+      
         wrap.appendChild(nameField);
         wrap.appendChild(iconField);
         wrap.appendChild(typeField);
+        wrap.appendChild(typeHint);
         wrap.appendChild(urlField);
-        wrap.appendChild(sandboxField);
         wrap.appendChild(htmlField);
+        wrap.appendChild(launchField);
+        wrap.appendChild(sandboxField);
         wrap.appendChild(err);
-
+      
         const btnCancel = document.createElement("button");
         btnCancel.className = "btn";
         btnCancel.textContent = "Cancel";
         btnCancel.addEventListener("click", closeModal);
-
+      
         const btnSave = document.createElement("button");
         btnSave.className = "btn btnPrimary";
         btnSave.textContent = "Install";
         btnSave.addEventListener("click", async ()=>{
           err.style.display = "none";
-
+      
           const name = (nameInput.value || "").trim();
           const iconText = (iconInput.value || "").trim() || "◆";
-          const icon = (iconDataUrl && iconDataUrl.trim()) ? iconDataUrl : iconText.slice(0,3);
-
+          const icon = (iconDataUrl && iconDataUrl.trim()) ? iconDataUrl : iconText.slice(0, 3);
           const type = typeSelect.value;
-          const url = (urlInput.value || "").trim();
           const html = (htmlArea.value || "").trim();
-          const mode = sandboxSelect.value;
-
+          const launchMode = launchSelect.value;
+          const sandboxMode = sandboxSelect.value;
+          const rawUrl = (urlInput.value || "").trim();
+      
           if (!name){
             err.textContent = "App name is required.";
             err.style.display = "block";
             return;
           }
+      
           if ((decryptedConfig.apps.user || []).length >= MAX_USER_APPS){
             err.textContent = "App quantity limit reached.";
             err.style.display = "block";
             return;
           }
-
+      
+          let normalizedUrl = "";
           if (type === "url"){
-            if (!url){
-              err.textContent = "App URL is required.";
+            try{
+              const parsed = new URL(rawUrl);
+              if (!/^https?:$/i.test(parsed.protocol)) throw new Error("bad_protocol");
+              normalizedUrl = parsed.toString();
+            } catch {
+              err.textContent = "Use a valid http:// or https:// app URL.";
               err.style.display = "block";
               return;
             }
@@ -4220,287 +4360,30 @@
               return;
             }
           }
-
+      
           const id = "user-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+      
           decryptedConfig.apps.user.push({
             id,
             name,
             icon,
             type,
-            url: (type === "url") ? url : "",
-            html: (type === "html") ? html : "",
-            sandboxMode: mode,
+            url: type === "url" ? normalizedUrl : "",
+            html: type === "html" ? html : "",
+            sandboxMode,
             kv: {}
           });
-
+      
+          decryptedConfig.os = decryptedConfig.os || {};
+          decryptedConfig.os.appLaunchPrefs = decryptedConfig.os.appLaunchPrefs || {};
+          decryptedConfig.os.appLaunchPrefs[id] = launchMode;
+      
           await persistConfig();
           rebuildDock();
           syncSettingsIframe();
           closeModal();
         });
-
-        openModal("Add app", wrap, [btnCancel, btnSave]);
-      }
-
-      function openAddAppModal(){
-        const wrap = document.createElement("div");
-
-        const err = document.createElement("div");
-        err.className = "error";
-        err.style.display = "none";
-
-        // Name
-        const nameField = document.createElement("div");
-        nameField.className = "field";
-        const nameLabel = document.createElement("label");
-        nameLabel.textContent = "App name";
-        const nameInput = document.createElement("input");
-        nameInput.type = "text";
-        nameInput.placeholder = "My App";
-        nameField.appendChild(nameLabel);
-        nameField.appendChild(nameInput);
-
-        // Icon (text + optional image upload)
-        const iconField = document.createElement("div");
-        iconField.className = "field";
-        const iconLabel = document.createElement("label");
-        iconLabel.textContent = "Icon (upload PNG/SVG/WebP or 1–3 chars fallback)";
-        const iconInput = document.createElement("input");
-        iconInput.type = "text";
-        iconInput.placeholder = "◆";
-        iconField.appendChild(iconLabel);
-        iconField.appendChild(iconInput);
-
-        let iconDataUrl = "";
-
-        const iconFile = document.createElement("input");
-        iconFile.type = "file";
-        iconFile.accept = "image/png,image/webp,image/svg+xml";
-        iconFile.style.display = "none";
-
-        const iconPreview = document.createElement("div");
-        iconPreview.className = "pill";
-        iconPreview.style.display = "inline-flex";
-        iconPreview.style.alignItems = "center";
-        iconPreview.style.gap = "8px";
-        iconPreview.style.padding = "6px 10px";
-
-        const btnIconUpload = document.createElement("button");
-        btnIconUpload.className = "btn";
-        btnIconUpload.type = "button";
-        btnIconUpload.textContent = "Upload icon";
-
-        const btnIconClear = document.createElement("button");
-        btnIconClear.className = "btn btnGhost";
-        btnIconClear.type = "button";
-        btnIconClear.textContent = "Clear image";
-
-        function renderIconPreview(){
-          iconPreview.innerHTML = "";
-          if (iconDataUrl){
-            const img = document.createElement("img");
-            img.src = iconDataUrl;
-            img.alt = "";
-            img.style.width = "18px";
-            img.style.height = "18px";
-            img.style.objectFit = "contain";
-            iconPreview.appendChild(img);
-
-            const t = document.createElement("span");
-            t.textContent = "Image icon";
-            t.style.color = "var(--muted)";
-            t.style.fontSize = "12px";
-            iconPreview.appendChild(t);
-          } else {
-            const t = document.createElement("span");
-            t.textContent = "Using text fallback";
-            t.style.color = "var(--muted)";
-            t.style.fontSize = "12px";
-            iconPreview.appendChild(t);
-          }
-        }
-        renderIconPreview();
-
-        btnIconUpload.addEventListener("click", ()=>{
-          err.style.display = "none";
-          iconFile.value = "";
-          iconFile.click();
-        });
-
-        btnIconClear.addEventListener("click", ()=>{
-          iconDataUrl = "";
-          renderIconPreview();
-        });
-
-        iconFile.addEventListener("change", async ()=>{
-          err.style.display = "none";
-          const f = iconFile.files && iconFile.files[0];
-          if (!f) return;
-
-          const dataUrl = await new Promise((resolve)=>{
-            const r = new FileReader();
-            r.onload = ()=> resolve(String(r.result || ""));
-            r.readAsDataURL(f);
-          });
-
-          // Enforce 256×256 max for bitmap icons (PNG/WebP)
-          if (/^data:image\/(png|webp)/.test(dataUrl)){
-            const ok = await new Promise((resolve)=>{
-              const img = new Image();
-              img.onload = ()=> resolve(img.width <= 256 && img.height <= 256);
-              img.onerror = ()=> resolve(false);
-              img.src = dataUrl;
-            });
-            if (!ok){
-              err.textContent = "Icon must be at most 256×256 pixels.";
-              err.style.display = "block";
-              return;
-            }
-          }
-
-          iconDataUrl = dataUrl;
-          renderIconPreview();
-        });
-
-        const iconRow = document.createElement("div");
-        iconRow.className = "row";
-        iconRow.appendChild(btnIconUpload);
-        iconRow.appendChild(btnIconClear);
-        iconRow.appendChild(iconPreview);
-
-        iconField.appendChild(iconRow);
-        iconField.appendChild(iconFile);
-
-        // Type: HTML vs URL
-        const typeField = document.createElement("div");
-        typeField.className = "field";
-        const typeLabel = document.createElement("label");
-        typeLabel.textContent = "App type";
-        const typeSelect = document.createElement("select");
-        typeSelect.innerHTML = `
-          <option value="html" selected>Inline HTML (single-file)</option>
-          <option value="url">URL (hosted page)</option>
-        `;
-        typeField.appendChild(typeLabel);
-        typeField.appendChild(typeSelect);
-
-        // URL field (only shown for type=url)
-        const urlField = document.createElement("div");
-        urlField.className = "field";
-        const urlLabel = document.createElement("label");
-        urlLabel.textContent = "App URL";
-        const urlInput = document.createElement("input");
-        urlInput.type = "text";
-        urlInput.placeholder = "https://example.com/app/";
-        urlField.appendChild(urlLabel);
-        urlField.appendChild(urlInput);
-
-        // Sandbox
-        const sandboxField = document.createElement("div");
-        sandboxField.className = "field";
-        const sandboxLabel = document.createElement("label");
-        sandboxLabel.textContent = "Sandbox mode";
-        const sandboxSelect = document.createElement("select");
-        sandboxSelect.innerHTML = `
-          <option value="strict" selected>Strict (recommended)</option>
-          <option value="trusted">Trusted (less safe)</option>
-        `;
-        const sandboxHint = document.createElement("div");
-        sandboxHint.className = "hint";
-        sandboxHint.textContent = "Strict isolates the app from the OS. Trusted allows same-origin storage and deeper browser capabilities.";
-        sandboxField.appendChild(sandboxLabel);
-        sandboxField.appendChild(sandboxSelect);
-        sandboxField.appendChild(sandboxHint);
-
-        // HTML field (only shown for type=html)
-        const htmlField = document.createElement("div");
-        htmlField.className = "field";
-        const htmlLabel = document.createElement("label");
-        htmlLabel.textContent = "App HTML";
-        const htmlArea = document.createElement("textarea");
-        htmlArea.placeholder = "<!doctype html>...";
-        htmlField.appendChild(htmlLabel);
-        htmlField.appendChild(htmlArea);
-
-        function renderType(){
-          const t = typeSelect.value;
-          urlField.style.display = (t === "url") ? "" : "none";
-          htmlField.style.display = (t === "html") ? "" : "none";
-        }
-        typeSelect.addEventListener("change", renderType);
-        renderType();
-
-        wrap.appendChild(nameField);
-        wrap.appendChild(iconField);
-        wrap.appendChild(typeField);
-        wrap.appendChild(urlField);
-        wrap.appendChild(sandboxField);
-        wrap.appendChild(htmlField);
-        wrap.appendChild(err);
-
-        const btnCancel = document.createElement("button");
-        btnCancel.className = "btn";
-        btnCancel.textContent = "Cancel";
-        btnCancel.addEventListener("click", closeModal);
-
-        const btnSave = document.createElement("button");
-        btnSave.className = "btn btnPrimary";
-        btnSave.textContent = "Install";
-        btnSave.addEventListener("click", async ()=>{
-          err.style.display = "none";
-
-          const name = (nameInput.value || "").trim();
-          const iconText = (iconInput.value || "").trim() || "◆";
-          const icon = (iconDataUrl && iconDataUrl.trim()) ? iconDataUrl : iconText.slice(0,3);
-
-          const type = typeSelect.value;
-          const url = (urlInput.value || "").trim();
-          const html = (htmlArea.value || "").trim();
-          const mode = sandboxSelect.value;
-
-          if (!name){
-            err.textContent = "App name is required.";
-            err.style.display = "block";
-            return;
-          }
-          if ((decryptedConfig.apps.user || []).length >= MAX_USER_APPS){
-            err.textContent = "App quantity limit reached.";
-            err.style.display = "block";
-            return;
-          }
-
-          if (type === "url"){
-            if (!url){
-              err.textContent = "App URL is required.";
-              err.style.display = "block";
-              return;
-            }
-          } else {
-            if (!html){
-              err.textContent = "App HTML is required.";
-              err.style.display = "block";
-              return;
-            }
-          }
-
-          const id = "user-" + Date.now() + "-" + Math.random().toString(16).slice(2);
-          decryptedConfig.apps.user.push({
-            id,
-            name,
-            icon,
-            type,
-            url: (type === "url") ? url : "",
-            html: (type === "html") ? html : "",
-            sandboxMode: mode,
-            kv: {}
-          });
-
-          await persistConfig();
-          rebuildDock();
-          syncSettingsIframe();
-          closeModal();
-        });
-
+      
         openModal("Add app", wrap, [btnCancel, btnSave]);
       }
 
@@ -4812,6 +4695,27 @@
         bindEnterSubmit("setupPw", "btnCreateOS");
         bindEnterSubmit("setupPw2", "btnCreateOS");
 
+        bindEnterSubmit("setupDisplayName", "btnCreateOS");
+        
+        const btnSetupPfpUpload = el("btnSetupPfpUpload");
+        const btnSetupPfpClear = el("btnSetupPfpClear");
+        
+        if (btnSetupPfpUpload){
+          btnSetupPfpUpload.addEventListener("click", ()=>{
+            filePFP.value = "";
+            filePFP.click();
+          });
+        }
+        
+        if (btnSetupPfpClear){
+          btnSetupPfpClear.addEventListener("click", ()=>{
+            pendingSetupPfpDataUrl = null;
+            updateSetupProfilePreview();
+          });
+        }
+        
+        updateSetupProfilePreview();
+        
         const btnOpenSettings = el("btnOpenSettings");
         if (btnOpenSettings) btnOpenSettings.addEventListener("click", ()=> openApp("settings"));
 
@@ -4862,7 +4766,7 @@
             if (stillHasText && stillFocused && searchHint){
               searchHint.classList.add("show");
             }
-          }, 4000);
+          }, 3000);
         };
 
         if (taskSearch && taskSearchInput){
@@ -4943,13 +4847,24 @@
 
         filePFP.addEventListener("change", async ()=>{
           const f = filePFP.files && filePFP.files[0];
-          if (!f || !decryptedConfig) return;
+          if (!f) return;
+        
           const reader = new FileReader();
           reader.onload = async ()=>{
-            decryptedConfig.profile.pfpDataUrl = reader.result;
-            applyTheme();
-            await persistConfig();
-            syncSettingsIframe();
+            const result = reader.result;
+        
+            if (decryptedConfig){
+              decryptedConfig.profile.pfpDataUrl = result;
+              applyTheme();
+              await persistConfig();
+              syncSettingsIframe();
+              return;
+            }
+        
+            if (screenSetup.classList.contains("active")){
+              pendingSetupPfpDataUrl = result;
+              updateSetupProfilePreview();
+            }
           };
           reader.readAsDataURL(f);
         });
@@ -5025,31 +4940,39 @@
 
       async function createNewOS(){
         enterFullscreenFromGesture();
+      
+        const displayName = (el("setupDisplayName").value || "").trim() || "Vortex User";
+        const themeId = (el("setupTheme").value || "neon-blue").trim() || "neon-blue";
         const pw = (el("setupPw").value || "").trim();
         const pw2 = (el("setupPw2").value || "").trim();
         const err = el("setupErr");
         err.style.display = "none";
-
+      
         if (!pw || pw.length < 6){
           err.textContent = "Password must be at least 6 characters.";
           err.style.display = "block";
           return;
         }
+      
         if (pw !== pw2){
           err.textContent = "Passwords do not match.";
           err.style.display = "block";
           return;
         }
-
+      
         decryptedConfig = defaultConfig();
+        decryptedConfig.profile.username = displayName;
+        decryptedConfig.profile.pfpDataUrl = pendingSetupPfpDataUrl || null;
+        decryptedConfig.appearance.themeId = themeId;
+      
         currentPassword = pw;
-
+      
         setScreen("os");
         setBoot(true, "Welcome", "Creating your encrypted OS file…");
-
+      
         const blob = await encryptConfig(decryptedConfig, currentPassword);
         await writeStoredBlob(blob);
-
+      
         await bootIntoOS("Welcome", "Loading apps and shell…");
       }
 
