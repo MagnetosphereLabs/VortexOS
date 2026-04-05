@@ -473,19 +473,15 @@
       min-width: 556px;
       min-height: 340px;
     }
-    .win.inline{
-      min-width: 0;
-      min-height: 0;
-      border-radius: 14px;
-    }
-    .win.inline .titlebar{ display:none; }
-    .win.inline .appHost{ height: 100%; }
 
-    /* Disable transitions + iframe interaction while dragging/resizing */
+    /* Disable transitions + heavy effects + iframe interaction while dragging/resizing */
     .win.dragging,
     .win.resizing{
       transition: none !important;
       user-select: none;
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      filter: none !important;
     }
     .win.dragging .frame,
     .win.resizing .frame{
@@ -685,7 +681,9 @@
       align-items: center;
       justify-content: center;
       padding: 16px;
-      background: rgba(0,0,0,0.55);
+      background: rgba(3,5,15,0.78);
+      -webkit-backdrop-filter: blur(18px) saturate(120%);
+      backdrop-filter: blur(18px) saturate(120%);
       z-index: 9998;
     }
     #modal.visible {
@@ -697,18 +695,19 @@
       100% { opacity: 1; }
     }
     .modalCard {
-      width: min(860px, 100%);
-      max-height: min(86vh, 900px);
-      border-radius: var(--radius-xl);
-      background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(0,0,0,0.24));
-      border: 1px solid rgba(255,255,255,0.08);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(26px);
-      padding: 14px;
+      width: min(760px, 100%);
+      max-height: min(88vh, 900px);
+      border-radius: 24px;
+      background: linear-gradient(180deg, rgba(11,15,36,0.98), rgba(8,11,28,0.96));
+      border: 1px solid rgba(255,255,255,0.10);
+      box-shadow: 0 28px 80px rgba(0,0,0,0.60);
+      -webkit-backdrop-filter: blur(24px);
+      backdrop-filter: blur(24px);
+      padding: 16px;
       overflow: hidden;
       display:flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
     }
     .modalTop {
       display:flex;
@@ -716,9 +715,20 @@
       justify-content: space-between;
       gap: 12px;
     }
-    .modalTitle { font-weight: 750; font-size: 14px; }
-    .modalBody { overflow:auto; padding-right: 2px; }
-    .modalActions { display:flex; gap: 10px; justify-content:flex-end; }
+    .modalTitle {
+      font-weight: 750;
+      font-size: 15px;
+    }
+    .modalBody {
+      overflow:auto;
+      padding-right: 2px;
+    }
+    .modalActions {
+      display:flex;
+      gap: 10px;
+      justify-content:flex-end;
+      flex-wrap: wrap;
+    }
 
     /* Responsive mode toggles */
     body.desktop #taskbar { display:flex; }
@@ -1160,803 +1170,478 @@
   </div>
 
   <!-- Built in app templates -->
-<template id="tpl-calculator">
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Calculator</title>
-  <style>
-    :root{
-      --accent:#2D8CFF;
-      --accent2:#00B8FF;
-      --accent-rgb:45,140,255;
-      --text:rgba(250,252,255,0.95);
-      --muted:rgba(175,190,235,0.78);
-      --stroke:rgba(255,255,255,0.08);
-      --glass:rgba(10,14,34,0.68);
-      --glass-2:rgba(6,8,22,0.88);
-      --wallpaper:
-        radial-gradient(1200px 900px at 12% 10%, rgba(45,140,255,0.26), transparent 60%),
-        linear-gradient(180deg, #050714, #070a16 45%, #040615);
-      --shadow:0 24px 70px rgba(0,0,0,0.45);
-      --r-xl:22px;
-      --r-lg:16px;
-      --r-md:14px;
-      --t:180ms;
-    }
-
-    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-    html,body{
-      margin:0;
-      height:100%;
-      overflow:hidden;
-      font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-      color:var(--text);
-      background:var(--wallpaper);
-    }
-
-    body::before{
-      content:"";
-      position:fixed;
-      inset:0;
-      background:linear-gradient(180deg, rgba(4,6,18,0.18), rgba(4,6,18,0.34));
-      pointer-events:none;
-    }
-
-    .app{
-      position:relative;
-      height:100%;
-      display:grid;
-      grid-template-rows:auto auto 1fr;
-      gap:12px;
-      padding:12px;
-    }
-
-    .glass{
-      background:linear-gradient(135deg, rgba(255,255,255,0.06), rgba(0,0,0,0.22));
-      border:1px solid rgba(255,255,255,0.08);
-      box-shadow:var(--shadow);
-      backdrop-filter:blur(22px);
-      -webkit-backdrop-filter:blur(22px);
-    }
-
-    .topbar{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      padding:12px 14px;
-      border-radius:var(--r-xl);
-    }
-
-    .titleWrap{min-width:0;}
-    .title{
-      margin:0;
-      font-size:15px;
-      font-weight:750;
-      letter-spacing:.01em;
-    }
-    .sub{
-      margin-top:3px;
-      font-size:12px;
-      color:var(--muted);
-    }
-
-    .modePill{
-      flex:0 0 auto;
-      padding:7px 11px;
-      border-radius:999px;
-      border:1px solid rgba(var(--accent-rgb),0.28);
-      background:rgba(var(--accent-rgb),0.14);
-      color:var(--text);
-      font-size:11px;
-      font-weight:700;
-      white-space:nowrap;
-      box-shadow:0 10px 28px rgba(var(--accent-rgb),0.18);
-    }
-
-    .display{
-      border-radius:var(--r-xl);
-      padding:14px;
-      display:grid;
-      gap:10px;
-    }
-
-    .memoryBar{
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
-      align-items:center;
-      justify-content:space-between;
-    }
-
-    .memoryControls{
-      display:flex;
-      flex-wrap:wrap;
-      gap:8px;
-    }
-
-    .chip{
-      border:none;
-      border-radius:999px;
-      padding:8px 11px;
-      background:rgba(255,255,255,0.05);
-      color:var(--text);
-      border:1px solid rgba(255,255,255,0.08);
-      font-size:11px;
-      font-weight:700;
-      cursor:pointer;
-      transition:transform var(--t), background var(--t), border-color var(--t), opacity var(--t);
-    }
-
-    .chip:hover{
-      transform:translateY(-1px);
-      background:rgba(255,255,255,0.08);
-    }
-
-    .memoryValue{
-      padding:8px 12px;
-      border-radius:999px;
-      background:rgba(255,255,255,0.05);
-      border:1px solid rgba(255,255,255,0.08);
-      font-size:11px;
-      color:var(--muted);
-      white-space:nowrap;
-    }
-
-    .screen{
-      min-height:92px;
-      border-radius:18px;
-      background:
-        linear-gradient(135deg, rgba(var(--accent-rgb),0.12), rgba(255,255,255,0.03)),
-        rgba(4,6,18,0.46);
-      border:1px solid rgba(255,255,255,0.08);
-      padding:14px 16px;
-      display:flex;
-      flex-direction:column;
-      justify-content:flex-end;
-      gap:6px;
-      box-shadow:inset 0 1px 0 rgba(255,255,255,0.05);
-    }
-
-    .expr{
-      min-height:18px;
-      color:var(--muted);
-      font-size:13px;
-      line-height:1.35;
-      text-align:right;
-      word-break:break-all;
-    }
-
-    .result{
-      font-size:34px;
-      line-height:1;
-      font-weight:800;
-      text-align:right;
-      letter-spacing:-0.03em;
-      word-break:break-all;
-      text-shadow:0 10px 30px rgba(var(--accent-rgb),0.12);
-    }
-
-    .workspace{
-      min-height:0;
-      display:grid;
-      grid-template-columns:minmax(0,1fr) 180px;
-      gap:12px;
-    }
-
-    .pad{
-      min-height:0;
-      border-radius:var(--r-xl);
-      padding:12px;
-      display:grid;
-      grid-template-columns:repeat(4, minmax(0, 1fr));
-      gap:10px;
-      align-content:stretch;
-    }
-
-    .history{
-      min-height:0;
-      border-radius:var(--r-xl);
-      padding:12px;
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-    }
-
-    .historyHead{
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:8px;
-    }
-
-    .historyTitle{
-      font-size:12px;
-      font-weight:750;
-      color:var(--text);
-    }
-
-    .historyList{
-      min-height:0;
-      overflow:auto;
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-      padding-right:2px;
-    }
-
-    .historyItem{
-      width:100%;
-      text-align:left;
-      border:none;
-      cursor:pointer;
-      border-radius:14px;
-      padding:10px 11px;
-      background:rgba(255,255,255,0.04);
-      border:1px solid rgba(255,255,255,0.07);
-      color:var(--text);
-      transition:transform var(--t), background var(--t), border-color var(--t);
-    }
-
-    .historyItem:hover{
-      transform:translateY(-1px);
-      background:rgba(255,255,255,0.07);
-      border-color:rgba(var(--accent-rgb),0.18);
-    }
-
-    .historyExpr{
-      font-size:11px;
-      color:var(--muted);
-      line-height:1.3;
-      word-break:break-all;
-    }
-
-    .historyResult{
-      margin-top:5px;
-      font-size:15px;
-      font-weight:750;
-      line-height:1.2;
-      word-break:break-all;
-    }
-
-    .emptyHistory{
-      padding:12px;
-      border-radius:14px;
-      background:rgba(255,255,255,0.03);
-      border:1px dashed rgba(255,255,255,0.08);
-      color:var(--muted);
-      font-size:12px;
-      line-height:1.45;
-    }
-
-    .key{
-      min-height:56px;
-      border:none;
-      border-radius:18px;
-      padding:0 12px;
-      cursor:pointer;
-      font-size:18px;
-      font-weight:800;
-      color:var(--text);
-      background:rgba(255,255,255,0.05);
-      border:1px solid rgba(255,255,255,0.08);
-      box-shadow:0 12px 28px rgba(0,0,0,0.18);
-      transition:transform var(--t), background var(--t), border-color var(--t), box-shadow var(--t), opacity var(--t);
-      user-select:none;
-    }
-
-    .key:hover{
-      transform:translateY(-2px);
-      background:rgba(255,255,255,0.08);
-      box-shadow:0 16px 34px rgba(0,0,0,0.24);
-    }
-
-    .key:active{
-      transform:translateY(0);
-      opacity:.95;
-    }
-
-    .key.utility{
-      color:rgba(240,245,255,0.92);
-      background:rgba(255,255,255,0.045);
-    }
-
-    .key.op{
-      background:rgba(var(--accent-rgb),0.12);
-      border-color:rgba(var(--accent-rgb),0.24);
-      box-shadow:0 14px 30px rgba(var(--accent-rgb),0.14);
-    }
-
-    .key.eq{
-      background:linear-gradient(135deg, var(--accent), var(--accent2));
-      color:#08102a;
-      border:none;
-      box-shadow:0 18px 40px rgba(var(--accent-rgb),0.34);
-    }
-
-    .key.zero{
-      grid-column:span 2;
-    }
-
-    @media (max-width: 760px){
-      .workspace{
-        grid-template-columns:1fr;
+  <template id="tpl-calculator">
+  <!doctype html>
+  <html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Calculator</title>
+    <style>
+      :root{
+        --accent:#2D8CFF;
+        --accent2:#00B8FF;
+        --accent-rgb:45,140,255;
+        --text:rgba(250,252,255,0.95);
+        --muted:rgba(175,190,235,0.78);
+        --stroke:rgba(255,255,255,0.08);
+        --wallpaper:
+          radial-gradient(1200px 900px at 12% 10%, rgba(45,140,255,0.26), transparent 60%),
+          linear-gradient(180deg, #050714, #070a16 45%, #040615);
+        --shadow:0 24px 70px rgba(0,0,0,0.45);
+        --r-xl:22px;
+        --r-lg:18px;
+        --t:160ms;
       }
-      .history{
-        max-height:150px;
+  
+      *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+      html,body{
+        margin:0;
+        height:100%;
+        overflow:hidden;
+        font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+        color:var(--text);
+        background:var(--wallpaper);
       }
+  
+      body::before{
+        content:"";
+        position:fixed;
+        inset:0;
+        background:linear-gradient(180deg, rgba(4,6,18,0.18), rgba(4,6,18,0.34));
+        pointer-events:none;
+      }
+  
+      .app{
+        height:100%;
+        display:grid;
+        grid-template-rows:auto auto 1fr;
+        gap:12px;
+        padding:12px;
+      }
+  
+      .glass{
+        background:linear-gradient(135deg, rgba(255,255,255,0.06), rgba(0,0,0,0.22));
+        border:1px solid rgba(255,255,255,0.08);
+        box-shadow:var(--shadow);
+        backdrop-filter:blur(18px);
+        -webkit-backdrop-filter:blur(18px);
+      }
+  
+      .topbar{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        padding:12px 14px;
+        border-radius:var(--r-xl);
+      }
+  
+      .title{
+        margin:0;
+        font-size:15px;
+        font-weight:750;
+        letter-spacing:.01em;
+      }
+  
+      .sub{
+        margin-top:3px;
+        font-size:12px;
+        color:var(--muted);
+      }
+  
+      .display{
+        border-radius:var(--r-xl);
+        padding:14px 16px;
+        min-height:108px;
+        display:flex;
+        flex-direction:column;
+        justify-content:flex-end;
+        gap:8px;
+      }
+  
+      .expr{
+        min-height:18px;
+        text-align:right;
+        color:var(--muted);
+        font-size:13px;
+        line-height:1.35;
+        word-break:break-all;
+      }
+  
       .result{
-        font-size:30px;
+        text-align:right;
+        font-size:36px;
+        line-height:1;
+        font-weight:800;
+        letter-spacing:-0.03em;
+        word-break:break-all;
       }
+  
+      .pad{
+        min-height:0;
+        border-radius:var(--r-xl);
+        padding:12px;
+        display:grid;
+        grid-template-columns:repeat(4, minmax(0, 1fr));
+        gap:10px;
+        align-content:stretch;
+      }
+  
       .key{
-        min-height:52px;
+        min-height:58px;
+        border:none;
+        border-radius:18px;
+        padding:0 12px;
+        cursor:pointer;
+        font-size:18px;
+        font-weight:800;
+        color:var(--text);
+        background:rgba(255,255,255,0.05);
+        border:1px solid rgba(255,255,255,0.08);
+        box-shadow:0 12px 28px rgba(0,0,0,0.18);
+        transition:transform var(--t), background var(--t), opacity var(--t), box-shadow var(--t);
+        user-select:none;
       }
-    }
-
-    @media (prefers-reduced-motion: reduce){
-      *{
-        animation:none !important;
-        transition:none !important;
+  
+      .key:hover{
+        transform:translateY(-1px);
+        background:rgba(255,255,255,0.08);
+        box-shadow:0 16px 34px rgba(0,0,0,0.24);
       }
-    }
-  </style>
-</head>
-<body>
-  <div class="app">
-    <div class="topbar glass">
-      <div class="titleWrap">
-        <div class="title">Calculator</div>
-        <div class="sub">Built in · theme-aware · keyboard ready</div>
-      </div>
-      <div class="modePill">Standard</div>
-    </div>
-
-    <div class="display glass">
-      <div class="memoryBar">
-        <div class="memoryControls">
-          <button class="chip" data-mem="mc">MC</button>
-          <button class="chip" data-mem="mr">MR</button>
-          <button class="chip" data-mem="mplus">M+</button>
-          <button class="chip" data-mem="mminus">M-</button>
+  
+      .key:active{
+        transform:translateY(0);
+        opacity:.95;
+      }
+  
+      .key.utility{
+        background:rgba(255,255,255,0.045);
+      }
+  
+      .key.op{
+        background:rgba(var(--accent-rgb),0.12);
+        border-color:rgba(var(--accent-rgb),0.24);
+      }
+  
+      .key.eq{
+        background:linear-gradient(135deg, var(--accent), var(--accent2));
+        color:#08102a;
+        border:none;
+        box-shadow:0 18px 40px rgba(var(--accent-rgb),0.34);
+      }
+  
+      .key.zero{
+        grid-column:span 2;
+      }
+  
+      @media (max-width: 720px){
+        .result{ font-size:32px; }
+        .key{ min-height:54px; }
+      }
+  
+      @media (prefers-reduced-motion: reduce){
+        *{ animation:none !important; transition:none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="topbar glass">
+        <div>
+          <div class="title">Calculator</div>
+          <div class="sub">Simple calculator</div>
         </div>
-        <div class="memoryValue" id="memoryValue">Memory: 0</div>
       </div>
-
-      <div class="screen">
-        <div class="expr" id="expr">0</div>
+  
+      <div class="display glass">
+        <div class="expr" id="expr">&nbsp;</div>
         <div class="result" id="result">0</div>
       </div>
-    </div>
-
-    <div class="workspace">
+  
       <div class="pad glass" id="pad">
         <button class="key utility" data-action="clear">C</button>
         <button class="key utility" data-action="backspace">⌫</button>
-        <button class="key utility" data-action="percent">%</button>
         <button class="key op" data-action="operator" data-value="/">÷</button>
-
+        <button class="key op" data-action="operator" data-value="*">×</button>
+  
         <button class="key" data-action="digit" data-value="7">7</button>
         <button class="key" data-action="digit" data-value="8">8</button>
         <button class="key" data-action="digit" data-value="9">9</button>
-        <button class="key op" data-action="operator" data-value="*">×</button>
-
+        <button class="key op" data-action="operator" data-value="-">−</button>
+  
         <button class="key" data-action="digit" data-value="4">4</button>
         <button class="key" data-action="digit" data-value="5">5</button>
         <button class="key" data-action="digit" data-value="6">6</button>
-        <button class="key op" data-action="operator" data-value="-">−</button>
-
+        <button class="key op" data-action="operator" data-value="+">+</button>
+  
         <button class="key" data-action="digit" data-value="1">1</button>
         <button class="key" data-action="digit" data-value="2">2</button>
         <button class="key" data-action="digit" data-value="3">3</button>
-        <button class="key op" data-action="operator" data-value="+">+</button>
-
-        <button class="key utility" data-action="sign">±</button>
+        <button class="key eq" data-action="equals">=</button>
+  
         <button class="key zero" data-action="digit" data-value="0">0</button>
         <button class="key" data-action="dot">.</button>
-        <button class="key eq" data-action="equals">=</button>
-      </div>
-
-      <div class="history glass">
-        <div class="historyHead">
-          <div class="historyTitle">History</div>
-          <button class="chip" id="clearHistory">Clear</button>
-        </div>
-        <div class="historyList" id="historyList">
-          <div class="emptyHistory">Your recent calculations show up here. Click one to reuse it.</div>
-        </div>
       </div>
     </div>
-  </div>
-
-  <script>
-    (function(){
-      const exprEl = document.getElementById("expr");
-      const resultEl = document.getElementById("result");
-      const historyList = document.getElementById("historyList");
-      const memoryValueEl = document.getElementById("memoryValue");
-      const clearHistoryBtn = document.getElementById("clearHistory");
-
-      const state = {
-        raw: "",
-        result: "0",
-        justEvaluated: false,
-        memory: 0,
-        history: []
-      };
-
-      function syncTheme(){
-        try{
-          const p = window.parent;
-          const pdoc = p && p.document;
-          if (!pdoc) return;
-
-          const rootStyles = p.getComputedStyle(pdoc.documentElement);
-          const accent = rootStyles.getPropertyValue("--accent").trim() || "#2D8CFF";
-          const accent2 = rootStyles.getPropertyValue("--accent2").trim() || "#00B8FF";
-          const accentRgb = rootStyles.getPropertyValue("--accent-rgb").trim() || "45,140,255";
-          const text = rootStyles.getPropertyValue("--text").trim() || "rgba(250,252,255,0.95)";
-          const muted = rootStyles.getPropertyValue("--muted").trim() || "rgba(175,190,235,0.78)";
-          const rootBg = (pdoc.getElementById("root") && pdoc.getElementById("root").style.background) || "";
-
-          document.documentElement.style.setProperty("--accent", accent);
-          document.documentElement.style.setProperty("--accent2", accent2);
-          document.documentElement.style.setProperty("--accent-rgb", accentRgb);
-          document.documentElement.style.setProperty("--text", text);
-          document.documentElement.style.setProperty("--muted", muted);
-
-          if (rootBg) {
-            document.documentElement.style.setProperty("--wallpaper", rootBg);
+  
+    <script>
+      (function(){
+        const exprEl = document.getElementById("expr");
+        const resultEl = document.getElementById("result");
+  
+        const state = {
+          current: "0",
+          stored: null,
+          op: null,
+          resetInput: false
+        };
+  
+        function syncTheme(){
+          try{
+            const p = window.parent;
+            const pdoc = p && p.document;
+            if (!pdoc) return;
+  
+            const rootStyles = p.getComputedStyle(pdoc.documentElement);
+            const accent = rootStyles.getPropertyValue("--accent").trim() || "#2D8CFF";
+            const accent2 = rootStyles.getPropertyValue("--accent2").trim() || "#00B8FF";
+            const accentRgb = rootStyles.getPropertyValue("--accent-rgb").trim() || "45,140,255";
+            const text = rootStyles.getPropertyValue("--text").trim() || "rgba(250,252,255,0.95)";
+            const muted = rootStyles.getPropertyValue("--muted").trim() || "rgba(175,190,235,0.78)";
+            const rootBg = (pdoc.getElementById("root") && pdoc.getElementById("root").style.background) || "";
+  
+            document.documentElement.style.setProperty("--accent", accent);
+            document.documentElement.style.setProperty("--accent2", accent2);
+            document.documentElement.style.setProperty("--accent-rgb", accentRgb);
+            document.documentElement.style.setProperty("--text", text);
+            document.documentElement.style.setProperty("--muted", muted);
+  
+            if (rootBg) document.documentElement.style.setProperty("--wallpaper", rootBg);
+          } catch {}
+        }
+  
+        function symbolFor(op){
+          if (op === "/") return "÷";
+          if (op === "*") return "×";
+          if (op === "-") return "−";
+          if (op === "+") return "+";
+          return "";
+        }
+  
+        function formatDisplay(value){
+          const num = Number(value);
+          if (!Number.isFinite(num)) return "Error";
+  
+          const abs = Math.abs(num);
+          if (abs >= 1e12 || (abs > 0 && abs < 1e-9)){
+            return num.toExponential(10).replace(/\.?0+e/, "e");
           }
-        } catch {}
-      }
-
-      function visual(raw){
-        return (raw || "0")
-          .replace(/\*/g, " × ")
-          .replace(/\//g, " ÷ ");
-      }
-
-      function formatNumber(n){
-        const num = Number(n);
-        if (!Number.isFinite(num)) return "Error";
-        if (Math.abs(num) >= 1e12 || (Math.abs(num) > 0 && Math.abs(num) < 1e-9)) {
-          return num.toExponential(8).replace(/\.?0+e/, "e");
-        }
-        const fixed = String(num);
-        if (fixed.includes("e")) return fixed;
-        const parts = fixed.split(".");
-        const whole = Number(parts[0]).toLocaleString(undefined, { maximumFractionDigits: 0 });
-        if (!parts[1]) return whole;
-        return whole + "." + parts[1].slice(0, 12);
-      }
-
-      function sanitize(expr){
-        return String(expr || "").replace(/\s+/g, "");
-      }
-
-      function canEvaluate(expr){
-        const s = sanitize(expr);
-        if (!s) return false;
-        return /[0-9)\]]/.test(s[s.length - 1]);
-      }
-
-      function evaluateExpression(expr){
-        let js = sanitize(expr);
-        if (!js) return 0;
-        if (!/^[0-9+\-*/().%]+$/.test(js)) throw new Error("bad_expr");
-
-        js = js.replace(/(\d+(\.\d+)?)%/g, "($1/100)");
-        js = js.replace(/\)\(/g, ")*(");
-
-        const out = Function('"use strict"; return (' + js + ');')();
-        if (!Number.isFinite(out)) throw new Error("bad_result");
-        return out;
-      }
-
-      function currentValue(){
-        if (state.justEvaluated) return Number(state.result);
-        if (!state.raw) return 0;
-        try{
-          if (canEvaluate(state.raw)) return evaluateExpression(state.raw);
-        } catch {}
-        const match = state.raw.match(/-?\d*\.?\d+$/);
-        return match ? Number(match[0]) : 0;
-      }
-
-      function pushHistory(raw, result){
-        const expr = sanitize(raw);
-        if (!expr) return;
-        const prettyResult = formatNumber(result);
-        const last = state.history[0];
-        if (last && last.raw === expr && last.result === prettyResult) return;
-        state.history.unshift({ raw: expr, result: prettyResult });
-        state.history = state.history.slice(0, 12);
-      }
-
-      function renderHistory(){
-        historyList.innerHTML = "";
-        if (!state.history.length){
-          historyList.innerHTML = '<div class="emptyHistory">Your recent calculations show up here. Click one to reuse it.</div>';
-          return;
-        }
-
-        state.history.forEach((item)=>{
-          const btn = document.createElement("button");
-          btn.className = "historyItem";
-          btn.innerHTML = '<div class="historyExpr">' + visual(item.raw) + '</div><div class="historyResult">' + item.result + '</div>';
-          btn.addEventListener("click", ()=>{
-            state.raw = item.raw;
-            state.result = item.result;
-            state.justEvaluated = true;
-            render();
-          });
-          historyList.appendChild(btn);
-        });
-      }
-
-      function render(){
-        exprEl.textContent = visual(state.raw || "0");
-        resultEl.textContent = state.result || "0";
-        memoryValueEl.textContent = "Memory: " + formatNumber(state.memory);
-        renderHistory();
-      }
-
-      function clearAll(){
-        state.raw = "";
-        state.result = "0";
-        state.justEvaluated = false;
-        render();
-      }
-
-      function backspace(){
-        if (state.justEvaluated){
-          state.raw = String(Number(state.result) || 0);
-          state.justEvaluated = false;
-        }
-        state.raw = state.raw.slice(0, -1);
-        if (!state.raw){
-          state.result = "0";
-          render();
-          return;
-        }
-        try{
-          if (canEvaluate(state.raw)) state.result = formatNumber(evaluateExpression(state.raw));
-        } catch {}
-        render();
-      }
-
-      function appendDigit(d){
-        if (state.justEvaluated){
-          state.raw = "";
-          state.justEvaluated = false;
-        }
-        const match = state.raw.match(/(^|[+\-*/(])0$/);
-        if (match && d === "0") return;
-        if (match && d !== "0"){
-          state.raw = state.raw.slice(0, -1) + d;
-        } else {
-          state.raw += d;
-        }
-        try{
-          if (canEvaluate(state.raw)) state.result = formatNumber(evaluateExpression(state.raw));
-          else state.result = formatNumber(currentValue());
-        } catch {}
-        render();
-      }
-
-      function appendDot(){
-        if (state.justEvaluated){
-          state.raw = "";
-          state.justEvaluated = false;
-        }
-        const seg = (state.raw.match(/(?:^|[+\-*/(])(-?\d*\.?\d*)$/) || [])[1] || "";
-        if (seg.includes(".")) return;
-        if (!state.raw || /[+\-*/(]$/.test(state.raw)) {
-          state.raw += "0.";
-        } else {
-          state.raw += ".";
-        }
-        render();
-      }
-
-      function appendOperator(op){
-        if (state.justEvaluated){
-          state.raw = String(Number(state.result) || 0);
-          state.justEvaluated = false;
-        }
-        if (!state.raw){
-          if (op === "-") {
-            state.raw = "-";
-            render();
+  
+          let out = String(num);
+          if (out.includes("e")) return out;
+          if (out.includes(".")){
+            out = out.replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "");
           }
-          return;
+          return out;
         }
-        if (/[+\-*/]$/.test(state.raw)){
-          state.raw = state.raw.slice(0, -1) + op;
-        } else {
-          state.raw += op;
+  
+        function update(){
+          exprEl.textContent = state.op && state.stored !== null
+            ? `${formatDisplay(state.stored)} ${symbolFor(state.op)}`
+            : "\u00A0";
+          resultEl.textContent = state.current;
         }
-        render();
-      }
-
-      function toggleSign(){
-        if (state.justEvaluated){
-          const n = -(Number(state.result) || 0);
-          state.raw = String(n);
-          state.result = formatNumber(n);
-          state.justEvaluated = true;
-          render();
-          return;
+  
+        function clearAll(){
+          state.current = "0";
+          state.stored = null;
+          state.op = null;
+          state.resetInput = false;
+          update();
         }
-
-        const match = state.raw.match(/(-?\d*\.?\d+)(?!.*-?\d*\.?\d+)/);
-        if (!match) {
-          state.raw = state.raw ? state.raw + "(-1)" : "-";
-          render();
-          return;
-        }
-
-        const val = match[1];
-        const start = match.index;
-        const end = start + val.length;
-        const swapped = val.startsWith("-") ? val.slice(1) : "-" + val;
-        state.raw = state.raw.slice(0, start) + swapped + state.raw.slice(end);
-
-        try{
-          if (canEvaluate(state.raw)) state.result = formatNumber(evaluateExpression(state.raw));
-        } catch {}
-        render();
-      }
-
-      function percentify(){
-        if (state.justEvaluated){
-          const n = (Number(state.result) || 0) / 100;
-          state.raw = String(n);
-          state.result = formatNumber(n);
-          state.justEvaluated = true;
-          render();
-          return;
-        }
-
-        const match = state.raw.match(/(-?\d*\.?\d+)(?!.*-?\d*\.?\d+)/);
-        if (!match) return;
-        const val = match[1];
-        const start = match.index;
-        const end = start + val.length;
-        state.raw = state.raw.slice(0, start) + "(" + val + "/100)" + state.raw.slice(end);
-
-        try{
-          if (canEvaluate(state.raw)) state.result = formatNumber(evaluateExpression(state.raw));
-        } catch {}
-        render();
-      }
-
-      function equals(){
-        if (!canEvaluate(state.raw)) return;
-        try{
-          const computed = evaluateExpression(state.raw);
-          pushHistory(state.raw, computed);
-          state.result = formatNumber(computed);
-          state.raw = String(computed);
-          state.justEvaluated = true;
-          render();
-        } catch {
-          state.result = "Error";
-          render();
-        }
-      }
-
-      function doMemory(action){
-        const value = Number(currentValue()) || 0;
-        if (action === "mc") state.memory = 0;
-        if (action === "mr"){
-          const mem = String(state.memory);
-          if (state.justEvaluated) {
-            state.raw = mem;
-            state.result = formatNumber(state.memory);
-            state.justEvaluated = false;
-          } else if (!state.raw || /[+\-*/]$/.test(state.raw)) {
-            state.raw += mem;
+  
+        function inputDigit(d){
+          if (state.current === "Error" || state.resetInput){
+            state.current = d;
+            state.resetInput = false;
+            update();
+            return;
+          }
+  
+          if (state.current === "0"){
+            state.current = d;
           } else {
-            state.raw = mem;
+            state.current += d;
           }
+          update();
         }
-        if (action === "mplus") state.memory += value;
-        if (action === "mminus") state.memory -= value;
-
-        try{
-          if (canEvaluate(state.raw)) state.result = formatNumber(evaluateExpression(state.raw));
-        } catch {}
-        render();
-      }
-
-      document.getElementById("pad").addEventListener("click", (e)=>{
-        const btn = e.target.closest("button");
-        if (!btn) return;
-        const action = btn.dataset.action;
-        const value = btn.dataset.value;
-
-        if (action === "digit") appendDigit(value);
-        if (action === "dot") appendDot();
-        if (action === "operator") appendOperator(value);
-        if (action === "clear") clearAll();
-        if (action === "backspace") backspace();
-        if (action === "sign") toggleSign();
-        if (action === "percent") percentify();
-        if (action === "equals") equals();
-      });
-
-      document.querySelectorAll("[data-mem]").forEach((btn)=>{
-        btn.addEventListener("click", ()=> doMemory(btn.dataset.mem));
-      });
-
-      clearHistoryBtn.addEventListener("click", ()=>{
-        state.history = [];
-        render();
-      });
-
-      window.addEventListener("keydown", (e)=>{
-        const k = e.key;
-
-        if (/^[0-9]$/.test(k)){
-          e.preventDefault();
-          appendDigit(k);
-          return;
+  
+        function inputDot(){
+          if (state.current === "Error" || state.resetInput){
+            state.current = "0.";
+            state.resetInput = false;
+            update();
+            return;
+          }
+  
+          if (!state.current.includes(".")){
+            state.current += ".";
+          }
+          update();
         }
-
-        if (k === "."){
-          e.preventDefault();
-          appendDot();
-          return;
+  
+        function backspace(){
+          if (state.current === "Error"){
+            clearAll();
+            return;
+          }
+  
+          if (state.resetInput){
+            state.current = "0";
+            state.resetInput = false;
+            update();
+            return;
+          }
+  
+          state.current = state.current.length > 1 ? state.current.slice(0, -1) : "0";
+          if (state.current === "-" || state.current === "") state.current = "0";
+          update();
         }
-
-        if (["+","-","*","/"].includes(k)){
-          e.preventDefault();
-          appendOperator(k);
-          return;
+  
+        function compute(a, b, op){
+          if (op === "+") return a + b;
+          if (op === "-") return a - b;
+          if (op === "*") return a * b;
+          if (op === "/"){
+            if (b === 0) return NaN;
+            return a / b;
+          }
+          return b;
         }
-
-        if (k === "%"){
-          e.preventDefault();
-          percentify();
-          return;
+  
+        function applyPending(){
+          if (state.op === null || state.stored === null) return;
+  
+          const a = Number(state.stored);
+          const b = Number(state.current);
+          const result = compute(a, b, state.op);
+  
+          if (!Number.isFinite(result)){
+            state.current = "Error";
+            state.stored = null;
+            state.op = null;
+            state.resetInput = true;
+            update();
+            return false;
+          }
+  
+          state.stored = result;
+          state.current = formatDisplay(result);
+          return true;
         }
-
-        if (k === "Enter" || k === "="){
-          e.preventDefault();
-          equals();
-          return;
+  
+        function setOperator(nextOp){
+          if (state.current === "Error"){
+            clearAll();
+            return;
+          }
+  
+          const currentValue = Number(state.current);
+  
+          if (state.op !== null && !state.resetInput){
+            const ok = applyPending();
+            if (!ok) return;
+          } else if (state.stored === null){
+            state.stored = currentValue;
+          }
+  
+          state.op = nextOp;
+          state.resetInput = true;
+          update();
         }
-
-        if (k === "Backspace"){
-          e.preventDefault();
-          backspace();
-          return;
+  
+        function equals(){
+          if (state.current === "Error") return;
+          if (state.op === null || state.stored === null) return;
+  
+          const ok = applyPending();
+          if (!ok) return;
+  
+          state.op = null;
+          state.stored = null;
+          state.resetInput = true;
+          update();
         }
-
-        if (k === "Escape"){
-          e.preventDefault();
-          clearAll();
-        }
-      });
-
-      syncTheme();
-      render();
-      
-      window.addEventListener("message", (e)=>{
-        const msg = e.data;
-        if (!msg || typeof msg !== "object") return;
-        if (msg.type === "vortex.theme.changed"){
-          syncTheme();
-        }
-      });
-    })();
-  </script>
-</body>
-</html>
+  
+        document.getElementById("pad").addEventListener("click", (e)=>{
+          const btn = e.target.closest("button");
+          if (!btn) return;
+  
+          const action = btn.dataset.action;
+          const value = btn.dataset.value;
+  
+          if (action === "digit") inputDigit(value);
+          if (action === "dot") inputDot();
+          if (action === "operator") setOperator(value);
+          if (action === "equals") equals();
+          if (action === "clear") clearAll();
+          if (action === "backspace") backspace();
+        });
+  
+        window.addEventListener("keydown", (e)=>{
+          const k = e.key;
+  
+          if (/^[0-9]$/.test(k)){
+            e.preventDefault();
+            inputDigit(k);
+            return;
+          }
+  
+          if (k === "."){
+            e.preventDefault();
+            inputDot();
+            return;
+          }
+  
+          if (["+","-","*","/"].includes(k)){
+            e.preventDefault();
+            setOperator(k);
+            return;
+          }
+  
+          if (k === "Enter" || k === "="){
+            e.preventDefault();
+            equals();
+            return;
+          }
+  
+          if (k === "Backspace"){
+            e.preventDefault();
+            backspace();
+            return;
+          }
+  
+          if (k === "Escape"){
+            e.preventDefault();
+            clearAll();
+          }
+        });
+  
+        syncTheme();
+        update();
+  
+        window.addEventListener("message", (e)=>{
+          const msg = e.data;
+          if (!msg || typeof msg !== "object") return;
+          if (msg.type === "vortex.theme.changed"){
+            syncTheme();
+          }
+        });
+      })();
+    </script>
+  </body>
+  </html>
   </template>
 
   <template id="tpl-calendar">
@@ -2270,9 +1955,9 @@
         <label for="launchMode" style="margin-top:10px;">Default launch mode</label>
         <select id="launchMode">
           <option value="windowed">Windowed in VortexOS</option>
-          <option value="inline">Inline in VortexOS</option>
           <option value="external">Browser tab</option>
         </select>
+        <div class="hint">This only applies to apps that do not already have their own saved open mode from Add app or Edit app.</div>
 
         <div class="divider"></div>
 
@@ -2287,7 +1972,7 @@
 
       <section id="tab-apps" style="display:none;">
         <h2>Apps</h2>
-        <div class="hint">Manage built-in editable apps and your custom apps.</div>
+        <div class="hint">Built-in apps come with VortexOS. Hosted websites load from a URL. Custom HTML apps are stored directly inside your encrypted OS file. Add or edit an app to change how it opens.</div>
         <div class="row">
           <button id="btnAddApp" class="btn">Add app</button>
         </div>
@@ -2366,7 +2051,7 @@
       if (timeFormat) timeFormat.value = (os.clock24h === false) ? "12" : "24";
       if (showSeconds) showSeconds.checked = !!os.showSeconds;
       if (searchEngine) searchEngine.value = (os.searchEngine || "duckduckgo");
-      if (launchMode) launchMode.value = (os.launchMode || "windowed");
+      if (launchMode) launchMode.value = (os.launchMode === "external") ? "external" : "windowed";
 
       // Profile
       username.value = (state.profile?.username || "").trim();
@@ -2400,9 +2085,24 @@
         const row = document.createElement("div");
         row.className = "item";
 
+        const left = document.createElement("div");
+        left.style.minWidth = "0";
+        left.style.flex = "1";
+
         const name = document.createElement("div");
         name.className = "itemName";
         name.textContent = item.name;
+
+        const meta = document.createElement("div");
+        meta.textContent = `${item.typeLabel} · ${item.openLabel}${item.usesOwnLaunchMode ? " · app setting" : " · OS default"}`;
+        meta.style.marginTop = "4px";
+        meta.style.fontSize = "11px";
+        meta.style.lineHeight = "1.35";
+        meta.style.color = "var(--muted)";
+        meta.style.whiteSpace = "normal";
+
+        left.appendChild(name);
+        left.appendChild(meta);
 
         const right = document.createElement("div");
         right.className = "miniRow";
@@ -2417,19 +2117,6 @@
           right.appendChild(edit);
         }
 
-        const launchPrefBtn = document.createElement("button");
-        launchPrefBtn.className = "btn";
-        const opensInside = (item.launchMode || "windowed") !== "external";
-        launchPrefBtn.textContent = opensInside ? "Always open inside VortexOS" : "Open in browser tab";
-        launchPrefBtn.addEventListener("click", ()=>{
-          parent.postMessage({
-            type: "vortex.os.setAppLaunchPref",
-            appId: item.id,
-            mode: opensInside ? "external" : "windowed"
-          }, "*");
-        });
-        right.appendChild(launchPrefBtn);
-
         if (item.kind === "user"){
           const del = document.createElement("button");
           del.className = "btn danger";
@@ -2440,7 +2127,7 @@
           right.appendChild(del);
         }
 
-        row.appendChild(name);
+        row.appendChild(left);
         row.appendChild(right);
         appList.appendChild(row);
       });
@@ -2468,7 +2155,7 @@
     });
 
     launchMode && launchMode.addEventListener("change", ()=>{
-      postOsPref("launchMode", launchMode.value);
+      postOsPref("launchMode", launchMode.value === "external" ? "external" : "windowed");
     });
 
     document.addEventListener("click", (e) => {
@@ -2561,6 +2248,49 @@
 
       function svgToDataUrl(svg){
         return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg.trim());
+      }
+
+      function isImageIcon(value){
+        const s = String(value || "").trim();
+        return /^data:image\//.test(s) || /^blob:/.test(s) || /^https?:\/\//i.test(s);
+      }
+
+      function cleanIconLetters(value){
+        return String(value || "").replace(/\s+/g, "").slice(0, 3).toUpperCase();
+      }
+
+      function defaultUserIconDataUrl(){
+        return svgToDataUrl(`
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+            <defs>
+              <linearGradient id="appIconGrad" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#7B5CFF"/>
+                <stop offset="1" stop-color="#2D8CFF"/>
+              </linearGradient>
+            </defs>
+            <rect x="3" y="3" width="18" height="18" rx="6" fill="url(#appIconGrad)"/>
+            <path d="M8 8.25h8M8 12h8M8 15.75h5.5" stroke="#F2F5FF" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        `);
+      }
+
+      function buildAppIconNode(app){
+        const iconStr = String(app?.icon || "").trim();
+        const resolvedIcon = iconStr || defaultUserIconDataUrl();
+
+        if (isImageIcon(resolvedIcon)){
+          const img = document.createElement("img");
+          img.className = "appIconImg";
+          img.alt = "";
+          img.src = resolvedIcon;
+          return img;
+        }
+
+        const txt = document.createElement("div");
+        txt.className = "appIconText";
+        txt.style.display = "block";
+        txt.textContent = resolvedIcon.slice(0, 3) || (app?.name?.[0] || "A");
+        return txt;
       }
 
       const BUILTIN_SVGS = {
@@ -2915,15 +2645,21 @@
 
 
       function isLaunchMode(v){
-        return v === "inline" || v === "windowed" || v === "external";
+        return v === "windowed" || v === "external";
       }
 
       function resolvePreferredMode(appId, preferredMode){
-        if (isLaunchMode(preferredMode)) return preferredMode;
+        if (preferredMode === "external") return "external";
+        if (preferredMode === "windowed" || preferredMode === "inline") return "windowed";
+
         const appPref = decryptedConfig?.os?.appLaunchPrefs?.[appId];
-        if (isLaunchMode(appPref)) return appPref;
+        if (appPref === "external") return "external";
+        if (appPref === "windowed" || appPref === "inline") return "windowed";
+
         const globalPref = decryptedConfig?.os?.launchMode;
-        if (isLaunchMode(globalPref)) return globalPref;
+        if (globalPref === "external") return "external";
+        if (globalPref === "windowed" || globalPref === "inline") return "windowed";
+
         return "windowed";
       }
 
@@ -2982,16 +2718,20 @@
       function renderEmbedErrorPanel(host, appMeta, launch, reason){
         const panel = document.createElement("div");
         panel.className = "embedErrorPanel visible";
-      
+
         const title = document.createElement("h3");
-        title.textContent = "This app could not open inside VortexOS";
-      
+        title.textContent = "This website cannot open inside this Vortex window";
+
         const body = document.createElement("p");
-        body.textContent = `${reason} Some sites block iframe embedding, so this app may need to open in a browser tab instead.`;
-      
+        let hostName = "This site";
+        try {
+          hostName = new URL(launch?.url || "").hostname || hostName;
+        } catch {}
+        body.textContent = `${hostName} may block iframe embedding or may not have loaded correctly here. ${reason}`.trim();
+
         const actions = document.createElement("div");
         actions.className = "row";
-      
+
         const btnOpenNow = document.createElement("button");
         btnOpenNow.className = "btn btnPrimary";
         btnOpenNow.textContent = "Open in browser tab";
@@ -3003,7 +2743,7 @@
           if (owner && owner.dataset.app) closeWindow(owner.dataset.app);
         });
         actions.appendChild(btnOpenNow);
-      
+
         if (appMeta && appMeta.id && !String(appMeta.id).startsWith("external-")){
           const btnAlways = document.createElement("button");
           btnAlways.className = "btn";
@@ -3018,7 +2758,19 @@
           });
           actions.appendChild(btnAlways);
         }
-      
+
+        if (appMeta?.kind === "user" && appMeta?.id){
+          const btnEdit = document.createElement("button");
+          btnEdit.className = "btn btnGhost";
+          btnEdit.textContent = "Edit app";
+          btnEdit.addEventListener("click", ()=>{
+            const owner = host.closest(".win");
+            if (owner && owner.dataset.app) closeWindow(owner.dataset.app);
+            openEditAppModal(appMeta.id);
+          });
+          actions.appendChild(btnEdit);
+        }
+
         const btnClose = document.createElement("button");
         btnClose.className = "btn btnGhost";
         btnClose.textContent = "Close";
@@ -3027,12 +2779,12 @@
           if (owner && owner.dataset.app) closeWindow(owner.dataset.app);
         });
         actions.appendChild(btnClose);
-      
+
         panel.appendChild(title);
         panel.appendChild(body);
         panel.appendChild(actions);
         host.appendChild(panel);
-      
+
         recordEmbedFailure(appMeta, launch, reason);
       }
 
@@ -3042,6 +2794,7 @@
 
         const frame = document.createElement("iframe");
         frame.className = "frame";
+        frame.referrerPolicy = "no-referrer";
         frame.setAttribute("sandbox", sandboxForApp(appMeta));
         host.appendChild(frame);
 
@@ -3051,25 +2804,41 @@
         }
 
         if (!navigator.onLine){
-          renderEmbedErrorPanel(host, appMeta, { ...launch, mode }, "No network connection is available right now.");
+          renderEmbedErrorPanel(host, appMeta, { ...launch, mode }, "You appear to be offline right now.");
           return host;
         }
 
-        let loaded = false;
-        const timeoutMs = 8000;
+        let settled = false;
+        const fail = (message)=>{
+          if (settled) return;
+          settled = true;
+          renderEmbedErrorPanel(host, appMeta, { ...launch, mode }, message);
+        };
+        const succeed = ()=>{
+          if (settled) return;
+          settled = true;
+        };
+
+        const timeoutMs = 4500;
         const t = setTimeout(()=>{
-          if (loaded) return;
-          renderEmbedErrorPanel(host, appMeta, { ...launch, mode }, "Embedding timed out. The site may block framing (X-Frame-Options/CSP).");
+          fail("If it keeps failing here, use a browser tab instead.");
         }, timeoutMs);
 
         frame.addEventListener("load", ()=>{
-          loaded = true;
           clearTimeout(t);
+          try{
+            const href = frame.contentWindow?.location?.href || "";
+            if (!href || href === "about:blank"){
+              fail("The page opened as a blank frame.");
+              return;
+            }
+          } catch {}
+          succeed();
         }, { once: true });
 
         frame.addEventListener("error", ()=>{
           clearTimeout(t);
-          renderEmbedErrorPanel(host, appMeta, { ...launch, mode }, "Embedding failed to load in this browser context.");
+          fail("The page could not be loaded in this browser context.");
         }, { once: true });
 
         frame.src = launch.url;
@@ -3104,45 +2873,14 @@
         });
 
         let r = null;
+        let raf = 0;
+        let pendingEvent = null;
 
-        function startResize(e, dir){
-          if (document.body.classList.contains("mobile")) return;
-          if (win.dataset.focused === "1") return; // don’t resize when maximized
-          e.preventDefault();
-          e.stopPropagation();
+        function applyResize(){
+          raf = 0;
+          if (!r || !pendingEvent) return;
 
-          bringToFront(win);
-
-          const area = windowsLayer.getBoundingClientRect();
-
-          const startLeft = win.offsetLeft;
-          const startTop  = win.offsetTop;
-          const startW = win.getBoundingClientRect().width;
-          const startH = win.getBoundingClientRect().height;
-
-          r = {
-            dir,
-            pid: e.pointerId,
-            sx: e.clientX,
-            sy: e.clientY,
-            left: startLeft,
-            top: startTop,
-            w: startW,
-            h: startH,
-            areaW: area.width,
-            areaH: area.height
-          };
-
-          win.classList.add("resizing");
-          document.body.style.userSelect = "none";
-          document.documentElement.style.cursor = getComputedStyle(e.target).cursor || "nwse-resize";
-
-          e.target.setPointerCapture(e.pointerId);
-        }
-
-        function moveResize(e){
-          if (!r) return;
-
+          const e = pendingEvent;
           const minW = 556;
           const minH = 340;
 
@@ -3156,29 +2894,24 @@
 
           const d = r.dir;
 
-          // horizontal
           if (d.includes("e")) w = r.w + dx;
           if (d.includes("w")){
             w = r.w - dx;
             left = r.left + dx;
           }
 
-          // vertical
           if (d.includes("s")) h = r.h + dy;
           if (d.includes("n")){
             h = r.h - dy;
             top = r.top + dy;
           }
 
-          // clamp size
           w = Math.max(minW, w);
           h = Math.max(minH, h);
 
-          // clamp position so window stays inside layer
           left = clamp(left, 0, r.areaW - w);
           top  = clamp(top, 0, r.areaH - h);
 
-          // also clamp size to not overflow after clamping position
           w = clamp(w, minW, r.areaW - left);
           h = clamp(h, minH, r.areaH - top);
 
@@ -3188,8 +2921,55 @@
           win.style.height = px(h);
         }
 
+        function queueResize(e){
+          pendingEvent = e;
+          if (!raf) raf = requestAnimationFrame(applyResize);
+        }
+
+        function startResize(e, dir){
+          if (document.body.classList.contains("mobile")) return;
+          if (win.dataset.focused === "1") return;
+          e.preventDefault();
+          e.stopPropagation();
+
+          bringToFront(win);
+
+          const area = windowsLayer.getBoundingClientRect();
+          const rect = win.getBoundingClientRect();
+
+          r = {
+            dir,
+            pid: e.pointerId,
+            sx: e.clientX,
+            sy: e.clientY,
+            left: win.offsetLeft,
+            top: win.offsetTop,
+            w: rect.width,
+            h: rect.height,
+            areaW: area.width,
+            areaH: area.height
+          };
+
+          pendingEvent = e;
+          win.classList.add("resizing");
+          document.body.style.userSelect = "none";
+          document.documentElement.style.cursor = getComputedStyle(e.target).cursor || "nwse-resize";
+
+          e.target.setPointerCapture(e.pointerId);
+        }
+
+        function moveResize(e){
+          if (!r) return;
+          queueResize(e);
+        }
+
         function endResize(e){
           if (!r) return;
+          if (raf){
+            cancelAnimationFrame(raf);
+            raf = 0;
+          }
+          pendingEvent = null;
           try{ e.target.releasePointerCapture(r.pid); } catch {}
           r = null;
           win.classList.remove("resizing");
@@ -3204,8 +2984,6 @@
           h.addEventListener("pointercancel", endResize);
         });
       }
-
-      let focusedAppId = null;
 
       function setIconFocused(appId, focused){
         const i1 = dockCenter.querySelector(`[data-app="${appId}"]`);
@@ -3276,11 +3054,11 @@
         }
 
         const win = document.createElement("div");
-        win.className = "win" + (mode === "inline" ? " inline" : "");
+        win.className = "win";
         win.dataset.app = appMeta.id;
         win.style.zIndex = String(++zTop);
 
-        if (!isMobile && mode !== "inline") {
+        if (!isMobile) {
           const idx = openWindows.size;
           win.style.left = `${18 + idx*26}px`;
           win.style.top = `${18 + idx*18}px`;
@@ -3291,113 +3069,144 @@
           win.style.height = "100%";
         }
 
-        let bar = null;
-        if (mode !== "inline"){
-          bar = document.createElement("div");
-          bar.className = "titlebar";
+        const bar = document.createElement("div");
+        bar.className = "titlebar";
 
-          const left = document.createElement("div");
-          left.className = "titleLeft";
+        const left = document.createElement("div");
+        left.className = "titleLeft";
 
-          const title = document.createElement("div");
-          title.className = "winTitle";
-          title.textContent = appMeta.name;
+        const title = document.createElement("div");
+        title.className = "winTitle";
+        title.textContent = appMeta.name;
 
-          left.appendChild(title);
+        left.appendChild(title);
 
-          const controls = document.createElement("div");
-          controls.className = "winControls";
+        const controls = document.createElement("div");
+        controls.className = "winControls";
 
-          const btnDock  = document.createElement("button");
-          const btnFocus = document.createElement("button");
-          const btnClose = document.createElement("button");
+        const btnDock  = document.createElement("button");
+        const btnFocus = document.createElement("button");
+        const btnClose = document.createElement("button");
 
-          btnDock.className  = "winBtn iconOnly";
-          btnFocus.className = "winBtn iconOnly";
-          btnClose.className = "winBtn iconOnly close";
+        btnDock.className  = "winBtn iconOnly";
+        btnFocus.className = "winBtn iconOnly";
+        btnClose.className = "winBtn iconOnly close";
 
-          btnDock.title = "Minimize to dock";
-          btnFocus.title = "Toggle fullscreen";
-          btnClose.title = "Close";
+        btnDock.title = "Minimize to dock";
+        btnFocus.title = "Toggle fullscreen";
+        btnClose.title = "Close";
 
-          btnDock.setAttribute("aria-label", "Minimize to dock");
-          btnFocus.setAttribute("aria-label", "Toggle fullscreen");
-          btnClose.setAttribute("aria-label", "Close window");
+        btnDock.setAttribute("aria-label", "Minimize to dock");
+        btnFocus.setAttribute("aria-label", "Toggle fullscreen");
+        btnClose.setAttribute("aria-label", "Close window");
 
-          btnDock.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M6 12h12" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round"/></svg>`;
-          btnFocus.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-          btnClose.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7L7 17" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round"/></svg>`;
+        btnDock.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M6 12h12" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round"/></svg>`;
+        btnFocus.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M8 4H4v4M16 4h4v4M8 20H4v-4M16 20h4v-4" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+        btnClose.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7L7 17" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round"/></svg>`;
 
-          controls.appendChild(btnDock);
-          controls.appendChild(btnFocus);
-          controls.appendChild(btnClose);
+        controls.appendChild(btnDock);
+        controls.appendChild(btnFocus);
+        controls.appendChild(btnClose);
 
-          bar.appendChild(left);
-          bar.appendChild(controls);
-          win.appendChild(bar);
+        bar.appendChild(left);
+        bar.appendChild(controls);
+        win.appendChild(bar);
 
-          btnClose.addEventListener("click", (e)=>{ e.stopPropagation(); closeWindow(appMeta.id); });
-          btnDock.addEventListener("click", (e)=>{ e.stopPropagation(); dockWindow(appMeta.id); });
+        btnClose.addEventListener("click", (e)=>{ e.stopPropagation(); closeWindow(appMeta.id); });
+        btnDock.addEventListener("click", (e)=>{ e.stopPropagation(); dockWindow(appMeta.id); });
 
-          btnFocus.addEventListener("click", (e)=>{
-            e.stopPropagation();
-            if (document.body.classList.contains("mobile")) return;
-            const isFocused = win.dataset.focused === "1";
-            if (!isFocused){
-              win.dataset.focused = "1";
-              win.dataset.prev = JSON.stringify({ left: win.style.left, top: win.style.top, width: win.style.width, height: win.style.height });
-              win.style.left = "12px";
-              win.style.top = "12px";
-              win.style.width = "calc(100% - 24px)";
-              win.style.height = "calc(100% - 24px)";
-            } else {
-              win.dataset.focused = "0";
-              try{
-                const prev = JSON.parse(win.dataset.prev || "{}");
-                win.style.left = prev.left || win.style.left;
-                win.style.top = prev.top || win.style.top;
-                win.style.width = prev.width || "";
-                win.style.height = prev.height || "";
-              } catch {}
-            }
-          });
+        btnFocus.addEventListener("click", (e)=>{
+          e.stopPropagation();
+          if (document.body.classList.contains("mobile")) return;
+          const isFocused = win.dataset.focused === "1";
+          if (!isFocused){
+            win.dataset.focused = "1";
+            win.dataset.prev = JSON.stringify({ left: win.style.left, top: win.style.top, width: win.style.width, height: win.style.height });
+            win.style.left = "12px";
+            win.style.top = "12px";
+            win.style.width = "calc(100% - 24px)";
+            win.style.height = "calc(100% - 24px)";
+          } else {
+            win.dataset.focused = "0";
+            try{
+              const prev = JSON.parse(win.dataset.prev || "{}");
+              win.style.left = prev.left || win.style.left;
+              win.style.top = prev.top || win.style.top;
+              win.style.width = prev.width || "";
+              win.style.height = prev.height || "";
+            } catch {}
+          }
+        });
 
-          let drag = null;
-          bar.addEventListener("pointerdown", (e)=>{
-            if (document.body.classList.contains("mobile")) return;
-            if (e.target.closest(".winControls")) return;
+        let drag = null;
+        let dragRaf = 0;
+        let pendingDragEvent = null;
 
-            win.classList.add("dragging");
-            drag = { ox: e.clientX - win.offsetLeft, oy: e.clientY - win.offsetTop };
-            bringToFront(win);
-            focusApp(appMeta.id);
-            bar.setPointerCapture(e.pointerId);
-          });
-          bar.addEventListener("pointerup", ()=>{
-            drag = null;
-            win.classList.remove("dragging");
-          });
-          bar.addEventListener("pointermove", (e)=>{
-            if (!drag) return;
-            const area = windowsLayer.getBoundingClientRect();
-            let x = e.clientX - drag.ox;
-            let y = e.clientY - drag.oy;
+        function applyDrag(){
+          dragRaf = 0;
+          if (!drag || !pendingDragEvent) return;
 
-            const maxX = Math.max(0, area.width - win.offsetWidth);
-            const maxY = Math.max(0, area.height - win.offsetHeight);
+          const e = pendingDragEvent;
+          const area = windowsLayer.getBoundingClientRect();
 
-            x = Math.max(0, Math.min(x, maxX));
-            y = Math.max(0, Math.min(y, maxY));
+          let x = e.clientX - drag.ox;
+          let y = e.clientY - drag.oy;
 
-            win.style.left = `${x}px`;
-            win.style.top = `${y}px`;
-          });
+          const maxX = Math.max(0, area.width - win.offsetWidth);
+          const maxY = Math.max(0, area.height - win.offsetHeight);
+
+          x = Math.max(0, Math.min(x, maxX));
+          y = Math.max(0, Math.min(y, maxY));
+
+          win.style.left = `${x}px`;
+          win.style.top = `${y}px`;
         }
+
+        function queueDrag(e){
+          pendingDragEvent = e;
+          if (!dragRaf) dragRaf = requestAnimationFrame(applyDrag);
+        }
+
+        function endDrag(){
+          if (!drag) return;
+          if (dragRaf){
+            cancelAnimationFrame(dragRaf);
+            dragRaf = 0;
+          }
+          pendingDragEvent = null;
+          try{ bar.releasePointerCapture(drag.pid); } catch {}
+          drag = null;
+          win.classList.remove("dragging");
+        }
+
+        bar.addEventListener("pointerdown", (e)=>{
+          if (document.body.classList.contains("mobile")) return;
+          if (e.target.closest(".winControls")) return;
+          if (win.dataset.focused === "1") return;
+
+          win.classList.add("dragging");
+          drag = {
+            pid: e.pointerId,
+            ox: e.clientX - win.offsetLeft,
+            oy: e.clientY - win.offsetTop
+          };
+          bringToFront(win);
+          focusApp(appMeta.id);
+          bar.setPointerCapture(e.pointerId);
+        });
+
+        bar.addEventListener("pointermove", (e)=>{
+          if (!drag) return;
+          queueDrag(e);
+        });
+
+        bar.addEventListener("pointerup", endDrag);
+        bar.addEventListener("pointercancel", endDrag);
 
         const host = createAppHost(appMeta, launch, mode);
         win.appendChild(host);
 
-        if (mode !== "inline") attachResizeHandles(win);
+        attachResizeHandles(win);
 
         if (appMeta.id === "settings") {
           const frame = host.querySelector("iframe");
@@ -3450,16 +3259,17 @@
             icon: mo.icon || bi.icon,
             kind: "builtin",
             editable: bi.editable,
-            // Built-ins default strict unless explicitly marked trusted.
             sandboxMode: bi.sandboxMode || ((bi.kind === "vortex") ? "trusted" : "strict")
           };
         }
+
         const ua = decryptedConfig?.apps?.user?.find(a => a.id === appId);
         if (!ua) return null;
+
         return {
           id: ua.id,
           name: ua.name,
-          icon: ua.icon || "◆",
+          icon: ua.icon || defaultUserIconDataUrl(),
           kind: "user",
           type: ua.type || (ua.url ? "url" : "html"),
           url: ua.url || "",
@@ -3486,7 +3296,7 @@
           ...(decryptedConfig?.apps?.user || []).map(a=>({
             id: a.id,
             name: a.name,
-            icon: a.icon || "◆",
+            icon: a.icon || defaultUserIconDataUrl(),
             kind: "user"
           }))
         ].sort((a,b)=>a.name.localeCompare(b.name));
@@ -3496,34 +3306,7 @@
           iconEl.className = "appIcon";
           iconEl.dataset.app = app.id;
           iconEl.title = app.name;
-
-          const iconStr = (app.icon || "").trim();
-          const isImg = /^data:image\//.test(iconStr) || /^blob:/.test(iconStr) || /^https?:\/\//.test(iconStr);
-
-          if (isImg){
-            const img = document.createElement("img");
-            img.className = "appIconImg";
-            img.alt = "";
-            img.src = iconStr;
-            iconEl.appendChild(img);
-          } else {
-            const iconStr = (app.icon || "").trim();
-            const isImg = /^data:image\//.test(iconStr) || /^blob:/.test(iconStr) || /^https?:\/\//.test(iconStr);
-
-            if (isImg){
-              const img = document.createElement("img");
-              img.className = "appIconImg";
-              img.alt = "";
-              img.src = iconStr;
-              iconEl.appendChild(img);
-            } else {
-              const txt = document.createElement("div");
-              txt.className = "appIconText";
-              txt.style.display = "block";
-              txt.textContent = (iconStr && iconStr.length <= 3) ? iconStr : (app.name[0] || "◆");
-              iconEl.appendChild(txt);
-            }
-          }
+          iconEl.appendChild(buildAppIconNode(app));
 
           iconEl.addEventListener("click", ()=> openApp(app.id));
           dockCenter.appendChild(iconEl);
@@ -3537,6 +3320,7 @@
 
           const gItem = document.createElement("div");
           gItem.className = "gridItem";
+
           const gIcon = iconEl.cloneNode(true);
           gIcon.style.width = "42px";
           gIcon.style.height = "42px";
@@ -3545,9 +3329,11 @@
             hideGrid();
             openApp(app.id);
           });
+
           const gName = document.createElement("div");
           gName.className = "gridName";
           gName.textContent = app.name;
+
           gItem.appendChild(gIcon);
           gItem.appendChild(gName);
           appGrid.appendChild(gItem);
@@ -3748,9 +3534,14 @@
       function appLaunchModeFor(appId){
         const appPrefs = decryptedConfig?.os?.appLaunchPrefs || {};
         const explicit = appPrefs[appId];
-        if (explicit === "inline" || explicit === "windowed" || explicit === "external") return explicit;
+
+        if (explicit === "external") return "external";
+        if (explicit === "windowed" || explicit === "inline") return "windowed";
+
         const globalMode = decryptedConfig?.os?.launchMode;
-        if (globalMode === "inline" || globalMode === "windowed" || globalMode === "external") return globalMode;
+        if (globalMode === "external") return "external";
+        if (globalMode === "windowed" || globalMode === "inline") return "windowed";
+
         return "windowed";
       }
 
@@ -3758,22 +3549,37 @@
         const list = [];
 
         const mo = decryptedConfig?.apps?.metaOverrides || {};
+        const appPrefs = decryptedConfig?.os?.appLaunchPrefs || {};
+
         for (const b of BUILTINS){
+          const name = (mo[b.id]?.name || b.name);
+          const typeLabel = b.kind === "vortex" ? "Vortex app" : "Built-in app";
+          const openMode = appLaunchModeFor(b.id);
+
           list.push({
             id: b.id,
-            name: (mo[b.id]?.name || b.name),
+            name,
             kind: "builtin",
             editable: b.editable,
-            launchMode: appLaunchModeFor(b.id)
+            launchMode: openMode,
+            openLabel: openMode === "external" ? "Browser tab" : "Windowed in VortexOS",
+            usesOwnLaunchMode: Object.prototype.hasOwnProperty.call(appPrefs, b.id),
+            typeLabel
           });
         }
+
         for (const u of (decryptedConfig?.apps?.user || [])){
+          const openMode = appLaunchModeFor(u.id);
+
           list.push({
             id: u.id,
             name: u.name,
             kind: "user",
             editable: true,
-            launchMode: appLaunchModeFor(u.id)
+            launchMode: openMode,
+            openLabel: openMode === "external" ? "Browser tab" : "Windowed in VortexOS",
+            usesOwnLaunchMode: Object.prototype.hasOwnProperty.call(appPrefs, u.id),
+            typeLabel: (u.type || (u.url ? "url" : "html")) === "url" ? "Hosted website" : "Custom HTML app"
           });
         }
 
@@ -4053,10 +3859,10 @@
         if (msg.type === "vortex.os.setAppLaunchPref" && msg.appId){
           if (!decryptedConfig) return;
           const mode = String(msg.mode || "windowed");
-          if (!["inline","windowed","external"].includes(mode)) return;
+          const normalizedMode = mode === "external" ? "external" : "windowed";
           decryptedConfig.os = decryptedConfig.os || {};
           decryptedConfig.os.appLaunchPrefs = decryptedConfig.os.appLaunchPrefs || {};
-          decryptedConfig.os.appLaunchPrefs[msg.appId] = mode;
+          decryptedConfig.os.appLaunchPrefs[msg.appId] = normalizedMode;
           await persistConfig();
           syncSettingsIframe();
           return;
@@ -4089,11 +3895,15 @@
 
       function openAddAppModal(){
         const wrap = document.createElement("div");
-      
+
+        const topHint = document.createElement("div");
+        topHint.className = "hint";
+        topHint.textContent = "Hosted website = opens a URL. Custom HTML app = stored directly inside your encrypted VortexOS file.";
+
         const err = document.createElement("div");
         err.className = "error";
         err.style.display = "none";
-      
+
         const nameField = document.createElement("div");
         nameField.className = "field";
         const nameLabel = document.createElement("label");
@@ -4103,158 +3913,142 @@
         nameInput.placeholder = "My App";
         nameField.appendChild(nameLabel);
         nameField.appendChild(nameInput);
-      
+
         const iconField = document.createElement("div");
         iconField.className = "field";
         const iconLabel = document.createElement("label");
-        iconLabel.textContent = "Icon (upload PNG/SVG/WebP or 1–3 chars fallback)";
+        iconLabel.textContent = "Icon";
         const iconInput = document.createElement("input");
         iconInput.type = "text";
-        iconInput.placeholder = "◆";
+        iconInput.placeholder = "Optional letters";
         iconField.appendChild(iconLabel);
         iconField.appendChild(iconInput);
-      
+
         let iconDataUrl = "";
-      
+
         const iconFile = document.createElement("input");
         iconFile.type = "file";
         iconFile.accept = "image/png,image/webp,image/svg+xml";
         iconFile.style.display = "none";
-      
-        const iconPreview = document.createElement("div");
-        iconPreview.className = "pill";
-        iconPreview.style.display = "inline-flex";
-        iconPreview.style.alignItems = "center";
-        iconPreview.style.gap = "8px";
-        iconPreview.style.padding = "6px 10px";
-      
+
+        const iconButtons = document.createElement("div");
+        iconButtons.className = "row";
+        iconButtons.style.marginTop = "10px";
+
         const btnIconUpload = document.createElement("button");
         btnIconUpload.className = "btn";
         btnIconUpload.type = "button";
-        btnIconUpload.textContent = "Upload icon";
-      
+        btnIconUpload.textContent = "Choose image";
+
         const btnIconClear = document.createElement("button");
         btnIconClear.className = "btn btnGhost";
         btnIconClear.type = "button";
-        btnIconClear.textContent = "Clear image";
-      
-        function renderIconPreview(){
+        btnIconClear.textContent = "Remove image";
+
+        const iconPreview = document.createElement("div");
+        iconPreview.className = "pill";
+        iconPreview.style.display = "none";
+        iconPreview.style.marginTop = "10px";
+        iconPreview.style.padding = "8px";
+        iconPreview.style.width = "48px";
+        iconPreview.style.height = "48px";
+        iconPreview.style.alignItems = "center";
+        iconPreview.style.justifyContent = "center";
+
+        function renderIconUi(){
+          btnIconClear.style.display = iconDataUrl ? "" : "none";
           iconPreview.innerHTML = "";
+          iconPreview.style.display = iconDataUrl ? "inline-flex" : "none";
+
           if (iconDataUrl){
             const img = document.createElement("img");
             img.src = iconDataUrl;
             img.alt = "";
-            img.style.width = "18px";
-            img.style.height = "18px";
+            img.style.width = "28px";
+            img.style.height = "28px";
             img.style.objectFit = "contain";
             iconPreview.appendChild(img);
-      
-            const t = document.createElement("span");
-            t.textContent = "Image icon";
-            t.style.color = "var(--muted)";
-            t.style.fontSize = "12px";
-            iconPreview.appendChild(t);
-          } else {
-            const t = document.createElement("span");
-            t.textContent = "Using text fallback";
-            t.style.color = "var(--muted)";
-            t.style.fontSize = "12px";
-            iconPreview.appendChild(t);
           }
         }
-        renderIconPreview();
-      
+
         btnIconUpload.addEventListener("click", ()=>{
           err.style.display = "none";
           iconFile.value = "";
           iconFile.click();
         });
-      
+
         btnIconClear.addEventListener("click", ()=>{
           iconDataUrl = "";
-          renderIconPreview();
+          renderIconUi();
         });
-      
+
         iconFile.addEventListener("change", async ()=>{
           err.style.display = "none";
           const f = iconFile.files && iconFile.files[0];
           if (!f) return;
-      
+
           const dataUrl = await new Promise((resolve)=>{
             const r = new FileReader();
             r.onload = ()=> resolve(String(r.result || ""));
             r.readAsDataURL(f);
           });
-      
-          if (/^data:image\/(png|webp)/.test(dataUrl)){
-            const ok = await new Promise((resolve)=>{
-              const img = new Image();
-              img.onload = ()=> resolve(img.width <= 256 && img.height <= 256);
-              img.onerror = ()=> resolve(false);
-              img.src = dataUrl;
-            });
-            if (!ok){
-              err.textContent = "Icon must be at most 256×256 pixels.";
-              err.style.display = "block";
-              return;
-            }
+
+          if (!/^data:image\/(png|webp|svg\+xml)/i.test(dataUrl)){
+            err.textContent = "Use a PNG, WebP, or SVG image.";
+            err.style.display = "block";
+            return;
           }
-      
+
           iconDataUrl = dataUrl;
-          renderIconPreview();
+          renderIconUi();
         });
-      
-        const iconRow = document.createElement("div");
-        iconRow.className = "row";
-        iconRow.appendChild(btnIconUpload);
-        iconRow.appendChild(btnIconClear);
-        iconRow.appendChild(iconPreview);
-      
-        iconField.appendChild(iconRow);
+
+        iconButtons.appendChild(btnIconUpload);
+        iconButtons.appendChild(btnIconClear);
+        iconField.appendChild(iconButtons);
+        iconField.appendChild(iconPreview);
         iconField.appendChild(iconFile);
-      
+
         const typeField = document.createElement("div");
         typeField.className = "field";
         const typeLabel = document.createElement("label");
         typeLabel.textContent = "App type";
         const typeSelect = document.createElement("select");
         typeSelect.innerHTML = `
-          <option value="html" selected>Portable HTML app</option>
-          <option value="url">Hosted web app</option>
+          <option value="url">Hosted website</option>
+          <option value="html">Custom HTML app</option>
         `;
-        typeField.appendChild(typeLabel);
-        typeField.appendChild(typeSelect);
-      
         const typeHint = document.createElement("div");
         typeHint.className = "hint";
-      
+        typeField.appendChild(typeLabel);
+        typeField.appendChild(typeSelect);
+
         const urlField = document.createElement("div");
         urlField.className = "field";
         const urlLabel = document.createElement("label");
-        urlLabel.textContent = "App URL";
+        urlLabel.textContent = "Website URL";
         const urlInput = document.createElement("input");
         urlInput.type = "text";
-        urlInput.placeholder = "https://example.com/app/";
+        urlInput.placeholder = "https://example.com";
         urlField.appendChild(urlLabel);
         urlField.appendChild(urlInput);
-      
+
         const htmlField = document.createElement("div");
         htmlField.className = "field";
         const htmlLabel = document.createElement("label");
         htmlLabel.textContent = "App HTML";
         const htmlArea = document.createElement("textarea");
-        htmlArea.placeholder = "<!doctype html>...";
+        htmlArea.placeholder = "<!doctype html>\n<html>...</html>";
         htmlField.appendChild(htmlLabel);
         htmlField.appendChild(htmlArea);
-      
+
         const launchField = document.createElement("div");
         launchField.className = "field";
         const launchLabel = document.createElement("label");
         launchLabel.textContent = "Open mode";
         const launchSelect = document.createElement("select");
         launchSelect.innerHTML = `
-          <option value="windowed" selected>Windowed in VortexOS</option>
-          <option value="inline">Inline in VortexOS</option>
+          <option value="windowed">Windowed in VortexOS</option>
           <option value="external">Browser tab</option>
         `;
         const launchHint = document.createElement("div");
@@ -4262,44 +4056,48 @@
         launchField.appendChild(launchLabel);
         launchField.appendChild(launchSelect);
         launchField.appendChild(launchHint);
-      
+
         const sandboxField = document.createElement("div");
         sandboxField.className = "field";
         const sandboxLabel = document.createElement("label");
         sandboxLabel.textContent = "Sandbox mode";
         const sandboxSelect = document.createElement("select");
         sandboxSelect.innerHTML = `
-          <option value="strict" selected>Strict</option>
-          <option value="trusted">Trusted</option>
+          <option value="strict">Safer isolation</option>
+          <option value="trusted">Trusted app</option>
         `;
         const sandboxHint = document.createElement("div");
         sandboxHint.className = "hint";
         sandboxField.appendChild(sandboxLabel);
         sandboxField.appendChild(sandboxSelect);
         sandboxField.appendChild(sandboxHint);
-      
+
         function renderType(){
           const isUrl = typeSelect.value === "url";
-      
+
           urlField.style.display = isUrl ? "" : "none";
           htmlField.style.display = isUrl ? "none" : "";
-      
           typeHint.textContent = isUrl
-            ? "Use this for self-hosted websites. Some sites block iframe embedding, so browser tab mode is sometimes the best option."
-            : "Use this for portable apps bundled directly into your encrypted VortexOS profile. Best for offline-first and self-contained apps.";
-      
+            ? "Use this for a normal website or hosted web app."
+            : "Use this when you want to paste the full app HTML directly into VortexOS.";
+
           launchHint.textContent = isUrl
-            ? "Windowed keeps the app inside VortexOS when possible. Browser tab is the most reliable option for sites that block iframe embedding."
-            : "Windowed keeps the desktop feel. Inline removes the title bar. Browser tab opens the app outside VortexOS.";
-      
-          sandboxHint.textContent = isUrl
-            ? "Strict is best for most apps and keeps them isolated. Trusted is only for apps you trust and control that need deeper browser capabilities."
-            : "Strict is best for most apps. Trusted is only for HTML apps you trust and control that need same-origin browser features.";
+            ? "Windowed tries to load the site inside VortexOS. If the site blocks embedding, VortexOS will offer to open it in a browser tab."
+            : "Windowed opens the app like a normal Vortex window. Browser tab opens it outside VortexOS.";
+
+          sandboxHint.textContent = sandboxSelect.value === "trusted"
+            ? (isUrl
+                ? "Only use Trusted for a site you fully trust and control. It gives the iframe deeper browser access."
+                : "Only use Trusted for code you fully trust. It gives the iframe same-origin browser access.")
+            : "Safer isolation. This is the best default for most apps.";
         }
-      
+
         typeSelect.addEventListener("change", renderType);
+        sandboxSelect.addEventListener("change", renderType);
         renderType();
-      
+        renderIconUi();
+
+        wrap.appendChild(topHint);
         wrap.appendChild(nameField);
         wrap.appendChild(iconField);
         wrap.appendChild(typeField);
@@ -4309,39 +4107,39 @@
         wrap.appendChild(launchField);
         wrap.appendChild(sandboxField);
         wrap.appendChild(err);
-      
+
         const btnCancel = document.createElement("button");
         btnCancel.className = "btn";
         btnCancel.textContent = "Cancel";
         btnCancel.addEventListener("click", closeModal);
-      
+
         const btnSave = document.createElement("button");
         btnSave.className = "btn btnPrimary";
         btnSave.textContent = "Install";
         btnSave.addEventListener("click", async ()=>{
           err.style.display = "none";
-      
+
           const name = (nameInput.value || "").trim();
-          const iconText = (iconInput.value || "").trim() || "◆";
-          const icon = (iconDataUrl && iconDataUrl.trim()) ? iconDataUrl : iconText.slice(0, 3);
+          const iconLetters = cleanIconLetters(iconInput.value);
+          const icon = iconDataUrl || iconLetters || defaultUserIconDataUrl();
           const type = typeSelect.value;
-          const html = (htmlArea.value || "").trim();
-          const launchMode = launchSelect.value;
-          const sandboxMode = sandboxSelect.value;
+          const launchMode = launchSelect.value === "external" ? "external" : "windowed";
+          const sandboxMode = sandboxSelect.value === "trusted" ? "trusted" : "strict";
           const rawUrl = (urlInput.value || "").trim();
-      
+          const html = (htmlArea.value || "").trim();
+
           if (!name){
             err.textContent = "App name is required.";
             err.style.display = "block";
             return;
           }
-      
+
           if ((decryptedConfig.apps.user || []).length >= MAX_USER_APPS){
             err.textContent = "App quantity limit reached.";
             err.style.display = "block";
             return;
           }
-      
+
           let normalizedUrl = "";
           if (type === "url"){
             try{
@@ -4349,7 +4147,7 @@
               if (!/^https?:$/i.test(parsed.protocol)) throw new Error("bad_protocol");
               normalizedUrl = parsed.toString();
             } catch {
-              err.textContent = "Use a valid http:// or https:// app URL.";
+              err.textContent = "Use a valid http:// or https:// website URL.";
               err.style.display = "block";
               return;
             }
@@ -4360,9 +4158,9 @@
               return;
             }
           }
-      
+
           const id = "user-" + Date.now() + "-" + Math.random().toString(16).slice(2);
-      
+
           decryptedConfig.apps.user.push({
             id,
             name,
@@ -4373,45 +4171,54 @@
             sandboxMode,
             kv: {}
           });
-      
+
           decryptedConfig.os = decryptedConfig.os || {};
           decryptedConfig.os.appLaunchPrefs = decryptedConfig.os.appLaunchPrefs || {};
           decryptedConfig.os.appLaunchPrefs[id] = launchMode;
-      
+
           await persistConfig();
           rebuildDock();
           syncSettingsIframe();
           closeModal();
         });
-      
+
         openModal("Add app", wrap, [btnCancel, btnSave]);
       }
 
       function openEditAppModal(appId){
         const bi = BUILTINS.find(a => a.id === appId);
         const isBuiltin = !!bi;
+        if (isBuiltin && !bi.editable) return;
 
         let appName = "";
         let icon = "";
+        let type = "html";
+        let url = "";
         let html = "";
         let sandboxMode = "strict";
+        let launchMode = appLaunchModeFor(appId);
 
         if (isBuiltin){
-          if (!bi.editable) return;
           const mo = decryptedConfig?.apps?.metaOverrides?.[appId] || {};
           appName = mo.name || bi.name;
           icon = mo.icon || bi.icon;
-          html = getBuiltinHtml(appId);
+          html = (decryptedConfig?.apps?.overrides?.[appId] || tplHtml(bi.tpl)).trim();
         } else {
           const ua = decryptedConfig.apps.user.find(a => a.id === appId);
           if (!ua) return;
           appName = ua.name;
-          icon = ua.icon || "◆";
+          icon = ua.icon || defaultUserIconDataUrl();
+          type = ua.type || (ua.url ? "url" : "html");
+          url = ua.url || "";
           html = ua.html || "";
           sandboxMode = ua.sandboxMode || "strict";
         }
 
         const wrap = document.createElement("div");
+
+        const err = document.createElement("div");
+        err.className = "error";
+        err.style.display = "none";
 
         const nameField = document.createElement("div");
         nameField.className = "field";
@@ -4426,71 +4233,61 @@
         const iconField = document.createElement("div");
         iconField.className = "field";
         const iconLabel = document.createElement("label");
-        iconLabel.textContent = "Icon (upload PNG/SVG/WebP or 1–3 chars fallback)";
-
+        iconLabel.textContent = "Icon";
         const iconInput = document.createElement("input");
         iconInput.type = "text";
+        iconInput.placeholder = "Optional letters";
+        iconField.appendChild(iconLabel);
+        iconField.appendChild(iconInput);
 
-        // If existing icon is an image data URL, use it as primary and keep text as fallback
-        let iconDataUrl = "";
-        const iconStr = (icon || "").trim();
-        const isImg = /^data:image\//.test(iconStr) || /^blob:/.test(iconStr);
-
-        if (isImg){
-          iconDataUrl = iconStr;
-          iconInput.value = ""; // fallback text optional
-        } else {
-          iconDataUrl = "";
-          iconInput.value = iconStr;
-        }
+        const iconStr = String(icon || "").trim();
+        let iconDataUrl = isImageIcon(iconStr) ? iconStr : "";
+        iconInput.value = iconDataUrl ? "" : cleanIconLetters(iconStr);
 
         const iconFile = document.createElement("input");
         iconFile.type = "file";
         iconFile.accept = "image/png,image/webp,image/svg+xml";
         iconFile.style.display = "none";
 
-        const iconPreview = document.createElement("div");
-        iconPreview.className = "pill";
-        iconPreview.style.display = "inline-flex";
-        iconPreview.style.alignItems = "center";
-        iconPreview.style.gap = "8px";
-        iconPreview.style.padding = "6px 10px";
+        const iconButtons = document.createElement("div");
+        iconButtons.className = "row";
+        iconButtons.style.marginTop = "10px";
 
         const btnIconUpload = document.createElement("button");
         btnIconUpload.className = "btn";
         btnIconUpload.type = "button";
-        btnIconUpload.textContent = "Upload icon";
+        btnIconUpload.textContent = "Choose image";
 
         const btnIconClear = document.createElement("button");
         btnIconClear.className = "btn btnGhost";
         btnIconClear.type = "button";
-        btnIconClear.textContent = "Clear image";
+        btnIconClear.textContent = "Remove image";
 
-        function renderIconPreview(){
+        const iconPreview = document.createElement("div");
+        iconPreview.className = "pill";
+        iconPreview.style.display = "none";
+        iconPreview.style.marginTop = "10px";
+        iconPreview.style.padding = "8px";
+        iconPreview.style.width = "48px";
+        iconPreview.style.height = "48px";
+        iconPreview.style.alignItems = "center";
+        iconPreview.style.justifyContent = "center";
+
+        function renderIconUi(){
+          btnIconClear.style.display = iconDataUrl ? "" : "none";
           iconPreview.innerHTML = "";
+          iconPreview.style.display = iconDataUrl ? "inline-flex" : "none";
+
           if (iconDataUrl){
             const img = document.createElement("img");
             img.src = iconDataUrl;
             img.alt = "";
-            img.style.width = "18px";
-            img.style.height = "18px";
+            img.style.width = "28px";
+            img.style.height = "28px";
             img.style.objectFit = "contain";
             iconPreview.appendChild(img);
-
-            const t = document.createElement("span");
-            t.textContent = "Image icon";
-            t.style.color = "var(--muted)";
-            t.style.fontSize = "12px";
-            iconPreview.appendChild(t);
-          } else {
-            const t = document.createElement("span");
-            t.textContent = "Using text fallback";
-            t.style.color = "var(--muted)";
-            t.style.fontSize = "12px";
-            iconPreview.appendChild(t);
           }
         }
-        renderIconPreview();
 
         btnIconUpload.addEventListener("click", ()=>{
           err.style.display = "none";
@@ -4500,7 +4297,7 @@
 
         btnIconClear.addEventListener("click", ()=>{
           iconDataUrl = "";
-          renderIconPreview();
+          renderIconUi();
         });
 
         iconFile.addEventListener("change", async ()=>{
@@ -4514,74 +4311,153 @@
             r.readAsDataURL(f);
           });
 
-          if (/^data:image\/(png|webp)/.test(dataUrl)){
-            const ok = await new Promise((resolve)=>{
-              const img = new Image();
-              img.onload = ()=> resolve(img.width <= 256 && img.height <= 256);
-              img.onerror = ()=> resolve(false);
-              img.src = dataUrl;
-            });
-            if (!ok){
-              err.textContent = "Icon must be at most 256×256 pixels.";
-              err.style.display = "block";
-              return;
-            }
+          if (!/^data:image\/(png|webp|svg\+xml)/i.test(dataUrl)){
+            err.textContent = "Use a PNG, WebP, or SVG image.";
+            err.style.display = "block";
+            return;
           }
 
           iconDataUrl = dataUrl;
-          renderIconPreview();
+          renderIconUi();
         });
 
-        const iconRow = document.createElement("div");
-        iconRow.className = "row";
-        iconRow.appendChild(btnIconUpload);
-        iconRow.appendChild(btnIconClear);
-        iconRow.appendChild(iconPreview);
-
-        iconField.appendChild(iconLabel);
-        iconField.appendChild(iconInput);
-        iconField.appendChild(iconRow);
+        iconButtons.appendChild(btnIconUpload);
+        iconButtons.appendChild(btnIconClear);
+        iconField.appendChild(iconButtons);
+        iconField.appendChild(iconPreview);
         iconField.appendChild(iconFile);
 
-        const htmlField = document.createElement("div");
-        htmlField.className = "field";
-        const htmlLabel = document.createElement("label");
-        htmlLabel.textContent = "App HTML";
-        const htmlArea = document.createElement("textarea");
-        htmlArea.value = html;
-        htmlField.appendChild(htmlLabel);
-        htmlField.appendChild(htmlArea);
-
-        let sandboxField = null;
+        let typeSelect = null;
+        let urlInput = null;
+        let htmlArea = null;
         let sandboxSelect = null;
+        let launchSelect = null;
+        let typeHint = null;
+        let urlField = null;
+        let htmlField = null;
+        let launchField = null;
+        let sandboxField = null;
+
         if (!isBuiltin){
+          const typeField = document.createElement("div");
+          typeField.className = "field";
+          const typeLabel = document.createElement("label");
+          typeLabel.textContent = "App type";
+          typeSelect = document.createElement("select");
+          typeSelect.innerHTML = `
+            <option value="url">Hosted website</option>
+            <option value="html">Custom HTML app</option>
+          `;
+          typeSelect.value = type;
+          typeHint = document.createElement("div");
+          typeHint.className = "hint";
+          typeField.appendChild(typeLabel);
+          typeField.appendChild(typeSelect);
+
+          urlField = document.createElement("div");
+          urlField.className = "field";
+          const urlLabel = document.createElement("label");
+          urlLabel.textContent = "Website URL";
+          urlInput = document.createElement("input");
+          urlInput.type = "text";
+          urlInput.placeholder = "https://example.com";
+          urlInput.value = url;
+          urlField.appendChild(urlLabel);
+          urlField.appendChild(urlInput);
+
+          htmlField = document.createElement("div");
+          htmlField.className = "field";
+          const htmlLabel = document.createElement("label");
+          htmlLabel.textContent = "App HTML";
+          htmlArea = document.createElement("textarea");
+          htmlArea.placeholder = "<!doctype html>\n<html>...</html>";
+          htmlArea.value = html;
+          htmlField.appendChild(htmlLabel);
+          htmlField.appendChild(htmlArea);
+
+          launchField = document.createElement("div");
+          launchField.className = "field";
+          const launchLabel = document.createElement("label");
+          launchLabel.textContent = "Open mode";
+          launchSelect = document.createElement("select");
+          launchSelect.innerHTML = `
+            <option value="windowed">Windowed in VortexOS</option>
+            <option value="external">Browser tab</option>
+          `;
+          launchSelect.value = launchMode === "external" ? "external" : "windowed";
+          const launchHint = document.createElement("div");
+          launchHint.className = "hint";
+          launchField.appendChild(launchLabel);
+          launchField.appendChild(launchSelect);
+          launchField.appendChild(launchHint);
+
           sandboxField = document.createElement("div");
           sandboxField.className = "field";
-          const sLabel = document.createElement("label");
-          sLabel.textContent = "Sandbox mode";
+          const sandboxLabel = document.createElement("label");
+          sandboxLabel.textContent = "Sandbox mode";
           sandboxSelect = document.createElement("select");
           sandboxSelect.innerHTML = `
-            <option value="strict">Strict (recommended)</option>
-            <option value="trusted">Trusted (less safe)</option>
+            <option value="strict">Safer isolation</option>
+            <option value="trusted">Trusted app</option>
           `;
-          sandboxSelect.value = sandboxMode;
-          const sHint = document.createElement("div");
-          sHint.className = "hint";
-          sHint.textContent = "Strict isolates the app from the OS. Trusted allows same-origin storage and deeper browser capabilities.";
-          sandboxField.appendChild(sLabel);
+          sandboxSelect.value = sandboxMode === "trusted" ? "trusted" : "strict";
+          const sandboxHint = document.createElement("div");
+          sandboxHint.className = "hint";
+          sandboxField.appendChild(sandboxLabel);
           sandboxField.appendChild(sandboxSelect);
-          sandboxField.appendChild(sHint);
+          sandboxField.appendChild(sandboxHint);
+
+          function renderType(){
+            const isUrl = typeSelect.value === "url";
+            urlField.style.display = isUrl ? "" : "none";
+            htmlField.style.display = isUrl ? "none" : "";
+            typeHint.textContent = isUrl
+              ? "Use this for a normal website or hosted web app."
+              : "Use this when you want to paste the full app HTML directly into VortexOS.";
+            launchHint.textContent = isUrl
+              ? "Windowed tries to load the site inside VortexOS. If the site blocks embedding, VortexOS will offer to open it in a browser tab."
+              : "Windowed opens the app like a normal Vortex window. Browser tab opens it outside VortexOS.";
+            sandboxHint.textContent = sandboxSelect.value === "trusted"
+              ? (isUrl
+                  ? "Only use Trusted for a site you fully trust and control. It gives the iframe deeper browser access."
+                  : "Only use Trusted for code you fully trust. It gives the iframe same-origin browser access.")
+              : "Safer isolation. This is the best default for most apps.";
+          }
+
+          typeSelect.addEventListener("change", renderType);
+          sandboxSelect.addEventListener("change", renderType);
+          renderType();
+
+          wrap.appendChild(typeField);
+          wrap.appendChild(typeHint);
+          wrap.appendChild(urlField);
+          wrap.appendChild(htmlField);
+          wrap.appendChild(launchField);
+          wrap.appendChild(sandboxField);
+        } else {
+          const htmlFieldBuiltIn = document.createElement("div");
+          htmlFieldBuiltIn.className = "field";
+          const htmlLabelBuiltIn = document.createElement("label");
+          htmlLabelBuiltIn.textContent = "App HTML";
+          htmlArea = document.createElement("textarea");
+          htmlArea.placeholder = "<!doctype html>\n<html>...</html>";
+          htmlArea.value = html;
+          htmlFieldBuiltIn.appendChild(htmlLabelBuiltIn);
+          htmlFieldBuiltIn.appendChild(htmlArea);
+          wrap.appendChild(htmlFieldBuiltIn);
         }
 
-        const err = document.createElement("div");
-        err.className = "error";
-        err.style.display = "none";
+        renderIconUi();
 
-        wrap.appendChild(nameField);
-        wrap.appendChild(iconField);
-        if (sandboxField) wrap.appendChild(sandboxField);
-        wrap.appendChild(htmlField);
-        wrap.appendChild(err);
+        const orderedWrap = document.createElement("div");
+        orderedWrap.appendChild(nameField);
+        orderedWrap.appendChild(iconField);
+
+        while (wrap.firstChild){
+          orderedWrap.appendChild(wrap.firstChild);
+        }
+
+        orderedWrap.appendChild(err);
 
         const btnCancel = document.createElement("button");
         btnCancel.className = "btn";
@@ -4593,39 +4469,69 @@
         btnSave.textContent = "Save";
         btnSave.addEventListener("click", async ()=>{
           err.style.display = "none";
-          const newName = (nameInput.value || "").trim();
-          const iconText = (iconInput.value || "").trim() || "◆";
-          const newIcon = (iconDataUrl && iconDataUrl.trim()) ? iconDataUrl : iconText.slice(0,3);
-          const newHtml = (htmlArea.value || "").trim();
 
+          const newName = (nameInput.value || "").trim();
           if (!newName){
             err.textContent = "App name is required.";
             err.style.display = "block";
             return;
           }
-          if (!newHtml){
-            err.textContent = "App HTML is required.";
-            err.style.display = "block";
-            return;
-          }
+
+          const newLetters = cleanIconLetters(iconInput.value);
+          const newIcon = iconDataUrl || newLetters || (isBuiltin ? bi.icon : defaultUserIconDataUrl());
 
           if (isBuiltin){
-            decryptedConfig.apps.overrides[appId] = newHtml;
+            const newHtml = (htmlArea.value || "").trim();
+            if (!newHtml){
+              err.textContent = "App HTML is required.";
+              err.style.display = "block";
+              return;
+            }
 
+            decryptedConfig.apps.overrides[appId] = newHtml;
             decryptedConfig.apps.metaOverrides = decryptedConfig.apps.metaOverrides || {};
             decryptedConfig.apps.metaOverrides[appId] = { name: newName, icon: newIcon };
           } else {
             const ua = decryptedConfig.apps.user.find(a => a.id === appId);
             if (!ua) return;
+
+            const editedType = typeSelect.value;
+            let normalizedUrl = "";
+            let newHtml = "";
+
+            if (editedType === "url"){
+              try{
+                const parsed = new URL((urlInput.value || "").trim());
+                if (!/^https?:$/i.test(parsed.protocol)) throw new Error("bad_protocol");
+                normalizedUrl = parsed.toString();
+              } catch {
+                err.textContent = "Use a valid http:// or https:// website URL.";
+                err.style.display = "block";
+                return;
+              }
+            } else {
+              newHtml = (htmlArea.value || "").trim();
+              if (!newHtml){
+                err.textContent = "App HTML is required.";
+                err.style.display = "block";
+                return;
+              }
+            }
+
             ua.name = newName;
             ua.icon = newIcon;
-            ua.html = newHtml;
-            ua.sandboxMode = sandboxSelect ? sandboxSelect.value : (ua.sandboxMode || "strict");
+            ua.type = editedType;
+            ua.url = editedType === "url" ? normalizedUrl : "";
+            ua.html = editedType === "html" ? newHtml : "";
+            ua.sandboxMode = sandboxSelect.value === "trusted" ? "trusted" : "strict";
+
+            decryptedConfig.os = decryptedConfig.os || {};
+            decryptedConfig.os.appLaunchPrefs = decryptedConfig.os.appLaunchPrefs || {};
+            decryptedConfig.os.appLaunchPrefs[appId] = launchSelect.value === "external" ? "external" : "windowed";
           }
 
           await persistConfig();
 
-          // If window is open, refresh it by closing and reopening for clean state.
           const wasOpen = openWindows.has(appId);
           if (wasOpen) closeWindow(appId);
 
@@ -4636,7 +4542,7 @@
           if (wasOpen) setTimeout(()=>openApp(appId), 80);
         });
 
-        openModal("Edit app", wrap, [btnCancel, btnSave]);
+        openModal("Edit app", orderedWrap, [btnCancel, btnSave]);
       }
 
       async function deleteUserApp(appId){
