@@ -1840,6 +1840,206 @@
 </body></html>
   </template>
 
+  <template id="tpl-vortex-browser">
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Vortex Browser</title>
+  <style>
+    :root{
+      --text: rgba(250,252,255,0.95);
+      --muted: rgba(175,190,235,0.78);
+      --stroke: rgba(255,255,255,0.08);
+      --accent: #2D8CFF;
+      --accent2: #00B8FF;
+      --accent-rgb: 45,140,255;
+      --bg: radial-gradient(900px 700px at 0% 0%, rgba(255,255,255,0.05), rgba(6,8,22,0.96));
+      --shadow: 0 18px 40px rgba(0,0,0,0.35);
+    }
+    *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html,body{
+      height:100%;
+      margin:0;
+      overflow:hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+    }
+    .browserShell{
+      height:100%;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      padding:8px;
+    }
+    .browserBar{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:8px;
+      border-radius:16px;
+      background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(0,0,0,0.22));
+      border:1px solid rgba(255,255,255,0.08);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+    .btn{
+      border:none;
+      border-radius:999px;
+      padding:8px 12px;
+      min-width:40px;
+      cursor:pointer;
+      color:var(--text);
+      background:rgba(255,255,255,0.06);
+      border:1px solid rgba(255,255,255,0.10);
+      font-size:12px;
+      font-weight:700;
+    }
+    .btn.primary{
+      color:#08102a;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border:none;
+    }
+    .urlBar{
+      flex:1;
+      min-width:0;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,0.10);
+      background:rgba(6,8,22,0.92);
+      color:var(--text);
+      padding:10px 14px;
+      outline:none;
+      font-size:13px;
+    }
+    .urlBar:focus{
+      border-color: rgba(var(--accent-rgb), 0.92);
+      box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.55);
+    }
+    .browserInfo{
+      min-height:28px;
+      padding:0 4px;
+      font-size:12px;
+      color:var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .frameWrap{
+      flex:1;
+      min-height:0;
+      border-radius:18px;
+      overflow:hidden;
+      background:rgba(5,7,20,0.92);
+      border:1px solid rgba(255,255,255,0.08);
+      box-shadow: var(--shadow);
+    }
+    #browserFrame{
+      width:100%;
+      height:100%;
+      border:none;
+      background:#fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="browserShell">
+    <div class="browserBar">
+      <button id="browserBack" class="btn" title="Back">←</button>
+      <button id="browserForward" class="btn" title="Forward">→</button>
+      <button id="browserReload" class="btn" title="Reload">↻</button>
+      <input id="browserUrl" class="urlBar" type="text" placeholder="Enter a URL or a search query" />
+      <button id="browserGo" class="btn primary">Go</button>
+    </div>
+
+    <div id="browserInfo" class="browserInfo">Connect Vortex Network in Settings to browse through your self-hosted node.</div>
+
+    <div class="frameWrap">
+      <iframe
+        id="browserFrame"
+        referrerpolicy="no-referrer"
+        allow="autoplay; encrypted-media"
+        sandbox="allow-scripts allow-forms allow-same-origin allow-downloads">
+      </iframe>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const urlBar = document.getElementById("browserUrl");
+      const info = document.getElementById("browserInfo");
+      const frame = document.getElementById("browserFrame");
+      const state = {
+        connected: false,
+        nodeUrl: "",
+        embedUrl: "",
+        currentUrl: "",
+        title: "",
+        mode: "hybrid"
+      };
+
+      function send(action, payload = {}){
+        parent.postMessage({ type: "vortex.browser.action", action, ...payload }, "*");
+      }
+
+      function render(){
+        if (!state.connected){
+          info.textContent = "Connect to the Vortex Network in Settings to browse through your self-hosted node.";
+          frame.removeAttribute("src");
+          frame.dataset.src = "";
+          if (document.activeElement !== urlBar) urlBar.value = "";
+          return;
+        }
+
+        if (document.activeElement !== urlBar){
+          urlBar.value = state.currentUrl || "";
+        }
+
+        info.textContent = state.title
+          ? `${state.title} · ${state.currentUrl || ""}`
+          : (state.currentUrl || state.nodeUrl || "Connected");
+
+        if (state.embedUrl && frame.dataset.src !== state.embedUrl){
+          frame.dataset.src = state.embedUrl;
+          frame.src = state.embedUrl;
+        }
+      }
+
+      document.getElementById("browserGo").addEventListener("click", ()=>{
+        send("navigate", { input: urlBar.value });
+      });
+
+      urlBar.addEventListener("keydown", (e)=>{
+        if (e.key === "Enter"){
+          e.preventDefault();
+          send("navigate", { input: urlBar.value });
+        }
+      });
+
+      document.getElementById("browserBack").addEventListener("click", ()=> send("back"));
+      document.getElementById("browserForward").addEventListener("click", ()=> send("forward"));
+      document.getElementById("browserReload").addEventListener("click", ()=> send("reload"));
+
+      window.addEventListener("message", (e)=>{
+        const msg = e.data;
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "vortex.browser.state"){
+          Object.assign(state, msg.state || {});
+          render();
+        }
+      });
+
+      window.addEventListener("DOMContentLoaded", ()=>{
+        parent.postMessage({ type: "vortex.browser.ready" }, "*");
+      });
+    })();
+  </script>
+</body>
+</html>
+  </template>
+  
   <template id="tpl-settings">
 <!doctype html>
 <html>
@@ -2020,6 +2220,7 @@
       <button class="tab active" data-tab="profile">Profile</button>
       <button class="tab" data-tab="appearance">Appearance</button>
       <button class="tab" data-tab="os">OS</button>
+      <button class="tab" data-tab="network">Network</button>
       <button class="tab" data-tab="apps">Apps</button>
     </div>
 
@@ -2103,9 +2304,55 @@
 
       </section>
 
+      <section id="tab-network" style="display:none;">
+        <h2>Vortex Network</h2>
+        <div class="hint">Connect VortexOS to your self-hosted Vortex Network node. Once connected, the built-in Browser and any <code>vortexnet:</code> hosted app URLs will run through your personal node.</div>
+
+        <label for="networkNodeUrl">Node URL</label>
+        <input id="networkNodeUrl" type="text" placeholder="https://node.example.com" />
+
+        <label for="networkUsername">Username</label>
+        <input id="networkUsername" type="text" placeholder="admin" />
+
+        <label for="networkPassword">Password</label>
+        <input id="networkPassword" type="password" placeholder="Node password" />
+
+        <div class="row">
+          <button id="btnNetworkConnect" class="btn">Connect</button>
+          <button id="btnNetworkDisconnect" class="btn danger">Disconnect</button>
+          <button id="btnNetworkRefresh" class="btn">Refresh status</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <h2>Remote browser</h2>
+        <div class="hint">Translated mode prefers local rendering through the node. Hybrid keeps that as the default and uses a remote visual fallback when needed.</div>
+
+        <label for="networkBrowserMode">Default node browser mode</label>
+        <select id="networkBrowserMode">
+          <option value="hybrid">Hybrid</option>
+          <option value="translate">Translated</option>
+          <option value="stream">Stream fallback</option>
+        </select>
+
+        <div class="row" style="margin-top:10px;">
+          <label style="margin:0;display:flex;align-items:center;gap:10px;">
+            <input id="networkedAppsDefault" type="checkbox" />
+            New hosted apps default to Vortex Network when prefixed with <code>vortexnet:</code>
+          </label>
+        </div>
+
+        <div class="divider"></div>
+
+        <h2>Status</h2>
+        <div class="list">
+          <div class="item" id="networkStatusCard"></div>
+        </div>
+      </section>
+      
       <section id="tab-apps" style="display:none;">
         <h2>Apps</h2>
-        <div class="hint">Built-in apps come with VortexOS. Hosted websites load from a URL. Custom HTML apps are stored directly inside your encrypted OS file. Add or edit an app to change how it opens.</div>
+        <div class="hint">Built-in apps come with VortexOS. Hosted websites load from a URL. Custom HTML apps are stored directly inside your encrypted OS file. Add or edit an app to change how it opens. Prefix a hosted website URL with <code>vortexnet:</code> to run it through your connected Vortex Network node, for example <code>vortexnet:https://google.com</code>.</div>
         <div class="row">
           <button id="btnAddApp" class="btn">Add app</button>
         </div>
@@ -2125,6 +2372,7 @@
       profile: document.getElementById("tab-profile"),
       appearance: document.getElementById("tab-appearance"),
       os: document.getElementById("tab-os"),
+      network: document.getElementById("tab-network"),
       apps: document.getElementById("tab-apps")
     };
 
@@ -2139,6 +2387,13 @@
 
     let state = null;
 
+    const networkNodeUrl = document.getElementById("networkNodeUrl");
+    const networkUsername = document.getElementById("networkUsername");
+    const networkPassword = document.getElementById("networkPassword");
+    const networkBrowserMode = document.getElementById("networkBrowserMode");
+    const networkedAppsDefault = document.getElementById("networkedAppsDefault");
+    const networkStatusCard = document.getElementById("networkStatusCard");
+    
     function showTab(key){
       tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === key));
       Object.keys(sections).forEach(k => sections[k].style.display = (k === key ? "" : "none"));
@@ -2186,6 +2441,26 @@
       if (searchEngine) searchEngine.value = (os.searchEngine || "duckduckgo");
       if (launchMode) launchMode.value = (os.launchMode === "external") ? "external" : "windowed";
 
+      const net = state.network || {};
+      if (networkNodeUrl && document.activeElement !== networkNodeUrl) networkNodeUrl.value = net.nodeUrl || "";
+      if (networkUsername && document.activeElement !== networkUsername) networkUsername.value = net.username || "";
+      if (networkBrowserMode) networkBrowserMode.value = net.browserMode || "hybrid";
+      if (networkedAppsDefault) networkedAppsDefault.checked = !!net.networkedAppsDefault;
+
+      if (networkStatusCard){
+        const connected = !!net.connected;
+        const top = connected ? "Connected" : "Not connected";
+        const bottom = net.currentBrowserUrl || net.nodeUrl || "No node configured yet";
+        const mode = net.browserMode || "hybrid";
+        networkStatusCard.innerHTML = `
+          <div style="min-width:0;flex:1;">
+            <div class="itemName">${top}</div>
+            <div style="margin-top:4px;font-size:11px;color:var(--muted);white-space:normal;line-height:1.35;">${bottom}</div>
+          </div>
+          <div style="font-size:11px;color:var(--muted);text-align:right;">${net.status || "offline"}<br>${mode}</div>
+        `;
+      }
+      
       // Profile
       username.value = (state.profile?.username || "").trim();
       const pfp = state.profile?.pfpDataUrl;
@@ -2291,6 +2566,35 @@
       postOsPref("launchMode", launchMode.value === "external" ? "external" : "windowed");
     });
 
+    networkBrowserMode && networkBrowserMode.addEventListener("change", ()=>{
+      parent.postMessage({ type: "vortex.settings.network.pref", key: "browserMode", value: networkBrowserMode.value }, "*");
+    });
+
+    networkedAppsDefault && networkedAppsDefault.addEventListener("change", ()=>{
+      parent.postMessage({ type: "vortex.settings.network.pref", key: "networkedAppsDefault", value: !!networkedAppsDefault.checked }, "*");
+    });
+
+    const btnNetworkConnect = document.getElementById("btnNetworkConnect");
+    const btnNetworkDisconnect = document.getElementById("btnNetworkDisconnect");
+    const btnNetworkRefresh = document.getElementById("btnNetworkRefresh");
+
+    btnNetworkConnect && btnNetworkConnect.addEventListener("click", ()=>{
+      parent.postMessage({
+        type: "vortex.settings.network.login",
+        nodeUrl: networkNodeUrl ? networkNodeUrl.value : "",
+        username: networkUsername ? networkUsername.value : "",
+        password: networkPassword ? networkPassword.value : ""
+      }, "*");
+    });
+
+    btnNetworkDisconnect && btnNetworkDisconnect.addEventListener("click", ()=>{
+      parent.postMessage({ type: "vortex.settings.network.logout" }, "*");
+    });
+
+    btnNetworkRefresh && btnNetworkRefresh.addEventListener("click", ()=>{
+      parent.postMessage({ type: "vortex.settings.network.refresh" }, "*");
+    });
+    
     document.addEventListener("click", (e) => {
       const id = e.target && e.target.id;
       if (!id) return;
@@ -2360,6 +2664,7 @@
         calendar: "",
         clock: "",
         settings: "",
+        "vortex-browser": "",
         "vortex-chat": "",
         "vortex-vault": "https://vortex.mglabs.dev"
       };
@@ -2448,6 +2753,12 @@
           <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.15.09a2 2 0 0 1-2-.03l-.16-.1a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.18a2 2 0 0 1-1 1.73l-.15.1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.16-.1a2 2 0 0 1 2-.03l.15.09a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.15-.09a2 2 0 0 1 2 .03l.16.1a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.73v-.18a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.16.1a2 2 0 0 1-2 .03l-.15-.09a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
           <circle cx="12" cy="12" r="3"/>
         </svg>`,
+        browser: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <path d="M3 9h18"/>
+          <path d="M9 3a16 16 0 0 0 0 18"/>
+          <path d="M15 3a16 16 0 0 1 0 18"/>
+        </svg>`,
         chat: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M20 14a4 4 0 0 1-4 4H9l-5 3V6a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v8Z"/>
           <path d="M8 9h8M8 12h6"/>
@@ -2464,6 +2775,7 @@
         { id: "calendar",    name: "Calendar",    icon: svgToDataUrl(BUILTIN_SVGS.calendar),    tpl: "tpl-calendar",    editable: true,  kind: "system" },
         { id: "clock",       name: "Clock",       icon: svgToDataUrl(BUILTIN_SVGS.clock),       tpl: "tpl-clock",       editable: true,  kind: "system" },
         { id: "settings",    name: "Settings",    icon: svgToDataUrl(BUILTIN_SVGS.settings),    tpl: "tpl-settings",    editable: false, kind: "system" },
+        { id: "vortex-browser", name: "Browser",  icon: svgToDataUrl(BUILTIN_SVGS.browser),     tpl: "tpl-vortex-browser", editable: false, kind: "vortex", sandboxMode: "trusted" },
         { id: "vortex-chat", name: "Vortex Chat", icon: svgToDataUrl(BUILTIN_SVGS.chat),        tpl: "tpl-vortex-chat", editable: false, kind: "vortex" },
         { id: "vortex-vault",name: "Vortex Vault",icon: svgToDataUrl(BUILTIN_SVGS.vault),       tpl: "tpl-vortex-vault",editable: false, kind: "vortex", sandboxMode: "trusted" }
       ].sort((a,b)=>a.name.localeCompare(b.name));
@@ -2635,16 +2947,26 @@
           createdAt: Date.now(),
           profile: { username: "Vortex User", pfpDataUrl: null },
           appearance: { themeId: "neon-blue" },
-      
+
           os: {
             clock24h: false,
             showSeconds: false,
             searchEngine: "duckduckgo",
             launchMode: "windowed",
             appLaunchPrefs: {},
-            embedFailures: []
+            embedFailures: [],
+            network: {
+              enabled: false,
+              nodeUrl: "",
+              username: "",
+              accessToken: "",
+              status: "offline",
+              lastConnectedAt: 0,
+              browserMode: "hybrid",
+              networkedAppsDefault: true
+            }
           },
-      
+
           apps: {
             user: [],
             overrides: {},
@@ -2718,6 +3040,221 @@
         return `https://duckduckgo.com/?t=h_&q=${q}&ia=web`;
       }
 
+      const vortexBrowserState = {
+        sessionId: "",
+        embedUrl: "",
+        currentUrl: "",
+        title: "",
+        mode: "hybrid",
+        lastOpenedAt: 0
+      };
+
+      function networkDefaults(){
+        return {
+          enabled: false,
+          nodeUrl: "",
+          username: "",
+          accessToken: "",
+          status: "offline",
+          lastConnectedAt: 0,
+          browserMode: "hybrid",
+          networkedAppsDefault: true
+        };
+      }
+
+      function getNetworkCfg(){
+        if (!decryptedConfig) return networkDefaults();
+        decryptedConfig.os = decryptedConfig.os || {};
+        decryptedConfig.os.network = Object.assign(networkDefaults(), decryptedConfig.os.network || {});
+        return decryptedConfig.os.network;
+      }
+
+      function normalizeNodeUrl(raw){
+        const text = String(raw || "").trim();
+        if (!text) return "";
+        try{
+          const parsed = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`);
+          return `${parsed.protocol}//${parsed.host}`.replace(/\/+$/, "");
+        } catch {
+          throw new Error("Use a valid http:// or https:// node URL.");
+        }
+      }
+
+      function networkConnected(){
+        const n = getNetworkCfg();
+        return !!(n.enabled && n.nodeUrl && n.accessToken);
+      }
+
+      async function nodeFetch(path, { method = "GET", headers = {}, body = null, absoluteUrl = "" } = {}){
+        const n = getNetworkCfg();
+        if (!n.nodeUrl) throw new Error("Vortex Network is not configured.");
+        const url = absoluteUrl || `${n.nodeUrl}${path}`;
+        const finalHeaders = Object.assign({}, headers);
+        if (n.accessToken) finalHeaders.Authorization = `Bearer ${n.accessToken}`;
+
+        const res = await fetch(url, {
+          method,
+          headers: finalHeaders,
+          body,
+          mode: "cors",
+          credentials: "omit"
+        });
+
+        if (!res.ok){
+          let msg = `Node request failed (${res.status})`;
+          try{
+            const data = await res.json();
+            if (data && data.detail) msg = String(data.detail);
+          } catch {}
+
+          if (res.status === 401){
+            n.enabled = false;
+            n.accessToken = "";
+            n.status = "auth-expired";
+            await persistConfig();
+            syncSettingsIframe();
+            syncBrowserIframe();
+          }
+
+          throw new Error(msg);
+        }
+
+        return res;
+      }
+
+      async function loginToVortexNetwork(nodeUrl, username, password){
+        const normalized = normalizeNodeUrl(nodeUrl);
+
+        const res = await fetch(`${normalized}/api/auth/login`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, password }),
+          mode: "cors",
+          credentials: "omit"
+        });
+
+        const data = await res.json().catch(()=>({}));
+        if (!res.ok) throw new Error(data && data.detail ? String(data.detail) : "Unable to log into Vortex Network.");
+
+        const n = getNetworkCfg();
+        n.enabled = true;
+        n.nodeUrl = normalized;
+        n.username = String(username || "").trim();
+        n.accessToken = data.access_token || "";
+        n.status = "connected";
+        n.lastConnectedAt = Date.now();
+        if (!n.browserMode) n.browserMode = "hybrid";
+
+        await persistConfig();
+        syncSettingsIframe();
+        syncBrowserIframe();
+        return data;
+      }
+
+      async function disconnectVortexNetwork(){
+        const n = getNetworkCfg();
+        n.enabled = false;
+        n.accessToken = "";
+        n.status = "offline";
+
+        if (vortexBrowserState.sessionId){
+          try{
+            await nodeFetch(`/api/browser/sessions/${encodeURIComponent(vortexBrowserState.sessionId)}`, { method: "DELETE" });
+          } catch {}
+        }
+
+        vortexBrowserState.sessionId = "";
+        vortexBrowserState.embedUrl = "";
+        vortexBrowserState.currentUrl = "";
+        vortexBrowserState.title = "";
+
+        await persistConfig();
+        syncSettingsIframe();
+        syncBrowserIframe();
+      }
+
+      async function refreshVortexNetworkStatus(){
+        const res = await nodeFetch("/api/me");
+        const data = await res.json();
+        const n = getNetworkCfg();
+        n.status = "connected";
+        n.lastConnectedAt = Date.now();
+        await persistConfig();
+        syncSettingsIframe();
+        syncBrowserIframe();
+        return data;
+      }
+
+      async function createRemoteSession(url, mode, { closePreviousBrowserSession = false } = {}){
+        if (!networkConnected()) throw new Error("Connect Vortex Network first.");
+
+        if (closePreviousBrowserSession && vortexBrowserState.sessionId){
+          try{
+            await nodeFetch(`/api/browser/sessions/${encodeURIComponent(vortexBrowserState.sessionId)}`, { method: "DELETE" });
+          } catch {}
+        }
+
+        const res = await nodeFetch("/api/browser/sessions", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ url, mode: mode || getNetworkCfg().browserMode || "hybrid" })
+        });
+
+        return await res.json();
+      }
+
+      async function openRemoteUrlInBrowser(url){
+        openApp("vortex-browser");
+        syncBrowserIframe();
+
+        const data = await createRemoteSession(url, getNetworkCfg().browserMode || "hybrid", {
+          closePreviousBrowserSession: true
+        });
+
+        vortexBrowserState.sessionId = data.session_id || "";
+        vortexBrowserState.embedUrl = data.embed_url || "";
+        vortexBrowserState.currentUrl = data.url || url;
+        vortexBrowserState.title = data.title || "Browser";
+        vortexBrowserState.mode = data.mode || (getNetworkCfg().browserMode || "hybrid");
+        vortexBrowserState.lastOpenedAt = Date.now();
+
+        syncBrowserIframe();
+        return data;
+      }
+
+      async function browserSessionAction(type, extra = {}){
+        if (!vortexBrowserState.sessionId) throw new Error("No active Vortex Browser session.");
+
+        const res = await nodeFetch(`/api/browser/sessions/${encodeURIComponent(vortexBrowserState.sessionId)}/action`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(Object.assign({ type }, extra))
+        });
+
+        const data = await res.json();
+        vortexBrowserState.currentUrl = data.url || vortexBrowserState.currentUrl;
+        vortexBrowserState.title = data.title || vortexBrowserState.title;
+        syncBrowserIframe();
+        return data;
+      }
+
+      function syncBrowserIframe(){
+        const win = openWindows.get("vortex-browser");
+        if (!win) return;
+        const frame = win.querySelector("iframe");
+        frame?.contentWindow?.postMessage({
+          type: "vortex.browser.state",
+          state: {
+            connected: networkConnected(),
+            nodeUrl: getNetworkCfg().nodeUrl || "",
+            embedUrl: vortexBrowserState.embedUrl || "",
+            currentUrl: vortexBrowserState.currentUrl || "",
+            title: vortexBrowserState.title || "",
+            mode: getNetworkCfg().browserMode || "hybrid"
+          }
+        }, "*");
+      }
+      
       function tplHtml(id){
         const t = document.getElementById(id);
         return (t && t.innerHTML) ? t.innerHTML.trim() : "<!doctype html><html><body>Missing template</body></html>";
@@ -2764,8 +3301,16 @@
         // User apps can be inline HTML or URL-based
         const t = String(appMeta.type || "html").toLowerCase();
         if (t === "url"){
-          const u = String(appMeta.url || "").trim();
-          if (u) return { type: "url", url: u };
+          const rawUrl = String(appMeta.url || "").trim();
+          if (rawUrl){
+            if (/^vortexnet:/i.test(rawUrl)){
+              return {
+                type: "vortex-remote-url",
+                url: rawUrl.replace(/^vortexnet:/i, "").trim()
+              };
+            }
+            return { type: "url", url: rawUrl };
+          }
         }
 
         return {
@@ -2932,6 +3477,42 @@
         frame.setAttribute("sandbox", sandboxForApp(appMeta));
         host.appendChild(frame);
 
+        if (launch.type === "vortex-remote-url") {
+          const loading = document.createElement("div");
+          loading.style.display = "grid";
+          loading.style.placeItems = "center";
+          loading.style.height = "100%";
+          loading.style.padding = "20px";
+          loading.style.color = "rgba(240,245,255,0.92)";
+          loading.innerHTML = `<div style="text-align:center;"><div style="font-weight:700;font-size:15px;">Connecting to Vortex Network…</div><div style="margin-top:8px;font-size:12px;color:rgba(175,190,235,0.78);">${launch.url}</div></div>`;
+          host.appendChild(loading);
+
+          (async ()=>{
+            try{
+              const data = await createRemoteSession(launch.url, getNetworkCfg().browserMode || "hybrid");
+              host.dataset.vortexSessionId = data.session_id || "";
+
+              const frame = document.createElement("iframe");
+              frame.className = "frame";
+              frame.referrerPolicy = "no-referrer";
+              frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin allow-downloads");
+              frame.src = data.embed_url;
+
+              host.innerHTML = "";
+              host.appendChild(frame);
+            } catch (err){
+              renderEmbedErrorPanel(
+                host,
+                appMeta,
+                { ...launch, mode },
+                (err && err.message) ? err.message : "Unable to open this app through Vortex Network."
+              );
+            }
+          })();
+
+          return host;
+        }
+        
         if (launch.type === "html") {
           frame.srcdoc = launch.html;
           return host;
@@ -3163,6 +3744,21 @@
         const win = openWindows.get(appId);
         if (!win) return;
 
+        const remoteSessionId =
+          win.querySelector(".appHost")?.dataset?.vortexSessionId ||
+          (appId === "vortex-browser" ? vortexBrowserState.sessionId : "");
+
+        if (remoteSessionId && networkConnected()){
+          nodeFetch(`/api/browser/sessions/${encodeURIComponent(remoteSessionId)}`, { method: "DELETE" }).catch(()=>{});
+        }
+
+        if (appId === "vortex-browser"){
+          vortexBrowserState.sessionId = "";
+          vortexBrowserState.embedUrl = "";
+          vortexBrowserState.currentUrl = "";
+          vortexBrowserState.title = "";
+        }
+        
         win.classList.remove("open", "minimized");
         win.classList.add("closing");
         setIconFocused(appId, false);
@@ -3741,7 +4337,9 @@
             launchMode: openMode,
             openLabel: openMode === "external" ? "Browser tab" : "Windowed in VortexOS",
             usesOwnLaunchMode: Object.prototype.hasOwnProperty.call(appPrefs, u.id),
-            typeLabel: (u.type || (u.url ? "url" : "html")) === "url" ? "Hosted website" : "Custom HTML app"
+            typeLabel: (u.type || (u.url ? "url" : "html")) === "url"
+              ? ((String(u.url || "").trim().toLowerCase().startsWith("vortexnet:")) ? "Vortex Network website" : "Hosted website")
+              : "Custom HTML app"
           });
         }
 
@@ -3859,17 +4457,40 @@
       function settingsState(){
         const themeId = decryptedConfig?.appearance?.themeId || "neon-blue";
         const theme = THEME_PRESETS.find(t => t.id === themeId) || THEME_PRESETS[0];
+        const net = decryptedConfig?.os?.network || networkDefaults();
+
         return {
           profile: decryptedConfig?.profile || { username: "Vortex User", pfpDataUrl: null },
           appearance: decryptedConfig?.appearance || { themeId: "neon-blue" },
 
-          os: decryptedConfig?.os || { clock24h: false, showSeconds: false, searchEngine: "duckduckgo", launchMode: "windowed", appLaunchPrefs: {}, embedFailures: [] },
+          os: decryptedConfig?.os || {
+            clock24h: false,
+            showSeconds: false,
+            searchEngine: "duckduckgo",
+            launchMode: "windowed",
+            appLaunchPrefs: {},
+            embedFailures: [],
+            network: networkDefaults()
+          },
+
+          network: {
+            enabled: !!net.enabled,
+            nodeUrl: net.nodeUrl || "",
+            username: net.username || "",
+            connected: networkConnected(),
+            status: net.status || "offline",
+            browserMode: net.browserMode || "hybrid",
+            networkedAppsDefault: net.networkedAppsDefault !== false,
+            lastConnectedAt: net.lastConnectedAt || 0,
+            currentBrowserUrl: vortexBrowserState.currentUrl || ""
+          },
 
           themes: THEME_PRESETS.map(t => ({
             id: t.id,
             name: t.name,
             bg: makeWallpaperBgPreview(t.accent || "#2f6bff", t.id)
           })),
+
           apps: settingsAppListData(),
           accent: theme.accent || "#2f6bff",
           accent2: theme.accent2 || theme.accent || "#4a92ff",
@@ -3895,6 +4516,74 @@
         const msg = event.data;
         if (!msg || typeof msg !== "object") return;
 
+        if (msg.type === "vortex.settings.network.login"){
+          try{
+            await loginToVortexNetwork(msg.nodeUrl, msg.username, msg.password);
+            syncSettingsIframe();
+            syncBrowserIframe();
+          } catch (err){
+            alert(err && err.message ? err.message : "Unable to connect to Vortex Network.");
+          }
+          return;
+        }
+
+        if (msg.type === "vortex.settings.network.logout"){
+          await disconnectVortexNetwork();
+          return;
+        }
+
+        if (msg.type === "vortex.settings.network.refresh"){
+          try{
+            await refreshVortexNetworkStatus();
+          } catch (err){
+            alert(err && err.message ? err.message : "Unable to refresh node status.");
+          }
+          return;
+        }
+
+        if (msg.type === "vortex.settings.network.pref"){
+          const n = getNetworkCfg();
+          n[msg.key] = msg.value;
+          await persistConfig();
+          syncSettingsIframe();
+          syncBrowserIframe();
+          return;
+        }
+
+        if (msg.type === "vortex.browser.ready"){
+          syncBrowserIframe();
+          return;
+        }
+
+        if (msg.type === "vortex.browser.action"){
+          try{
+            if (msg.action === "navigate"){
+              const raw = String(msg.input || "").trim();
+              if (!raw) return;
+
+              const looksLikeUrl =
+                /^https?:\/\//i.test(raw) ||
+                /^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(raw);
+
+              const target = looksLikeUrl
+                ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
+                : buildSearchUrl(raw, decryptedConfig?.os?.searchEngine || "duckduckgo", false);
+
+              if (!target) return;
+              await openRemoteUrlInBrowser(target);
+            } else if (msg.action === "reload"){
+              await browserSessionAction("reload");
+            } else if (msg.action === "back"){
+              await browserSessionAction("back");
+            } else if (msg.action === "forward"){
+              await browserSessionAction("forward");
+            }
+          } catch (err){
+            alert(err && err.message ? err.message : "Vortex Browser request failed.");
+          }
+          return;
+        }
+        
         if (msg.type === "vortex.settings.osPref"){
           if (!decryptedConfig) return;
           const k = String(msg.key || "");
@@ -4060,7 +4749,7 @@
 
         const topHint = document.createElement("div");
         topHint.className = "hint";
-        topHint.textContent = "Hosted website = opens a URL. Custom HTML app = stored directly inside your encrypted VortexOS file.";
+        topHint.innerHTML = 'Hosted website = opens a URL. Custom HTML app = stored directly inside your encrypted VortexOS file. Prefix a hosted website URL with <code>vortexnet:</code> to force it through your connected Vortex Network node.';
 
         const err = document.createElement("div");
         err.className = "error";
@@ -4856,7 +5545,7 @@
             armHint();
           });
 
-          taskSearchInput.addEventListener("keydown", (e)=>{
+          taskSearchInput.addEventListener("keydown", async (e)=>{
             if (e.key === "Shift"){
               shiftHeld = true;
               applySearchPlaceholder();
@@ -4872,20 +5561,28 @@
             const q = (taskSearchInput.value || "").trim();
             if (!q) return;
 
-            const engine = decryptedConfig?.os?.searchEngine || "duckduckgo";
-            const url = buildSearchUrl(q, engine, !!e.shiftKey);
-            if (url) launchUrl(url, "external");
+            const looksLikeUrl =
+              /^https?:\/\//i.test(q) ||
+              /^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(q);
+
+            const target = looksLikeUrl
+              ? (/^https?:\/\//i.test(q) ? q : `https://${q}`)
+              : buildSearchUrl(q, decryptedConfig?.os?.searchEngine || "duckduckgo", !!e.shiftKey);
+
+            if (target){
+              try{
+                if (networkConnected()){
+                  await openRemoteUrlInBrowser(target);
+                } else {
+                  launchUrl(target, "external");
+                }
+              } catch (err){
+                alert(err && err.message ? err.message : "Unable to open the request.");
+              }
+            }
 
             taskSearchInput.value = "";
             taskSearchInput.blur();
-          });
-
-          taskSearchInput.addEventListener("keyup", (e)=>{
-            if (e.key === "Shift"){
-              shiftHeld = false;
-              applySearchPlaceholder();
-              armHint();
-            }
           });
 
           // Set an initial placeholder (updates again after decrypt/theme)
