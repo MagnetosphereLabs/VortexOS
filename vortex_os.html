@@ -2039,6 +2039,94 @@
 </body>
 </html>
   </template>
+
+  <template id="tpl-clock">
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Clock</title>
+  <style>
+    :root{
+      --accent:#2D8CFF;
+      --accent2:#00B8FF;
+      --text:rgba(250,252,255,0.95);
+      --muted:rgba(175,190,235,0.78);
+      --wallpaper: radial-gradient(900px 700px at 0% 0%, rgba(255,255,255,0.05), rgba(6,8,22,0.96));
+    }
+    html,body{
+      height:100%;
+      margin:0;
+      background:var(--wallpaper);
+      color:var(--text);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+      overflow:hidden;
+    }
+    .wrap{
+      height:100%;
+      display:grid;
+      place-items:center;
+      text-align:center;
+      padding:20px;
+    }
+    .time{
+      font-size:clamp(40px, 12vw, 96px);
+      font-weight:800;
+      letter-spacing:-0.04em;
+      line-height:1;
+    }
+    .date{
+      margin-top:12px;
+      font-size:clamp(14px, 3vw, 22px);
+      color:var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div>
+      <div class="time" id="clockTime">00:00</div>
+      <div class="date" id="clockDate">—</div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      function syncTheme(){
+        try{
+          const p = window.parent;
+          const pdoc = p && p.document;
+          if (!pdoc) return;
+          const rs = p.getComputedStyle(pdoc.documentElement);
+          document.documentElement.style.setProperty("--accent", rs.getPropertyValue("--accent").trim() || "#2D8CFF");
+          document.documentElement.style.setProperty("--accent2", rs.getPropertyValue("--accent2").trim() || "#00B8FF");
+          document.documentElement.style.setProperty("--text", rs.getPropertyValue("--text").trim() || "rgba(250,252,255,0.95)");
+          document.documentElement.style.setProperty("--muted", rs.getPropertyValue("--muted").trim() || "rgba(175,190,235,0.78)");
+          const rootBg = pdoc.getElementById("root")?.style.background || "";
+          if (rootBg) document.documentElement.style.setProperty("--wallpaper", rootBg);
+        } catch {}
+      }
+
+      function tick(){
+        const d = new Date();
+        document.getElementById("clockTime").textContent = d.toLocaleTimeString();
+        document.getElementById("clockDate").textContent =
+          d.toLocaleDateString(undefined, { weekday:"long", month:"long", day:"numeric", year:"numeric" });
+      }
+
+      syncTheme();
+      tick();
+      setInterval(tick, 1000);
+
+      window.addEventListener("message", (e)=>{
+        if (e.data && e.data.type === "vortex.theme.changed") syncTheme();
+      });
+    })();
+  </script>
+</body>
+</html>
+  </template>
   
   <template id="tpl-settings">
 <!doctype html>
@@ -2255,6 +2343,14 @@
           <button id="btnImport" class="btn">Import vortex.os</button>
         </div>
 
+        <div class="divider"></div>
+        
+        <h2>Factory reset</h2>
+        <div class="hint">Deletes the encrypted vortex.os profile stored in this browser and restarts VortexOS like a brand new install.</div>
+        <div class="row">
+          <button id="btnFactoryResetOS" class="btn danger">Erase and reinstall VortexOS</button>
+        </div>
+        
         <div class="divider"></div>
 
         <h2>Clock</h2>
@@ -2651,10 +2747,6 @@
 
     networkBrowserMode && networkBrowserMode.addEventListener("change", ()=>{
       parent.postMessage({ type: "vortex.settings.network.pref", key: "browserMode", value: networkBrowserMode.value }, "*");
-    });
-
-    networkedAppsDefault && networkedAppsDefault.addEventListener("change", ()=>{
-      parent.postMessage({ type: "vortex.settings.network.pref", key: "networkedAppsDefault", value: !!networkedAppsDefault.checked }, "*");
     });
 
     const btnNetworkConnect = document.getElementById("btnNetworkConnect");
@@ -3100,6 +3192,51 @@
         };
       }
 
+      function migrateDecryptedConfig(raw){
+        const base = defaultConfig();
+        const src = (raw && typeof raw === "object") ? raw : {};
+
+        const next = {
+          ...base,
+          ...src,
+          profile: { ...base.profile, ...(src.profile || {}) },
+          appearance: { ...base.appearance, ...(src.appearance || {}) },
+          os: { ...base.os, ...(src.os || {}) },
+          apps: {
+            user: Array.isArray(src.apps?.user) ? src.apps.user : [],
+            overrides: (src.apps?.overrides && typeof src.apps.overrides === "object") ? src.apps.overrides : {},
+            metaOverrides: (src.apps?.metaOverrides && typeof src.apps.metaOverrides === "object") ? src.apps.metaOverrides : {}
+          }
+        };
+
+        next.os.network = Object.assign(networkDefaults(), src.os?.network || {});
+        next.os.network.nodeSettings = Object.assign(
+          networkDefaults().nodeSettings,
+          src.os?.network?.nodeSettings || {}
+        );
+        next.os.appLaunchPrefs = (src.os?.appLaunchPrefs && typeof src.os.appLaunchPrefs === "object")
+          ? src.os.appLaunchPrefs
+          : {};
+        next.os.embedFailures = Array.isArray(src.os?.embedFailures) ? src.os.embedFailures : [];
+
+        return next;
+      }
+
+      async function clearStoredBlob(){
+        try{
+          await new Promise((resolve)=>{
+            const req = indexedDB.deleteDatabase(DB_NAME);
+            req.onsuccess = ()=> resolve();
+            req.onerror = ()=> resolve();
+            req.onblocked = ()=> resolve();
+          });
+        } catch {}
+
+        try{
+          localStorage.removeItem(LS_FALLBACK_KEY);
+        } catch {}
+      }
+      
       function broadcastThemeRefresh(){
         for (const [, win] of openWindows.entries()){
           const frame = win.querySelector("iframe");
@@ -5081,6 +5218,16 @@
           }
         }
 
+        if (msg.id === "btnFactoryResetOS"){
+          const ok = confirm("This deletes your local encrypted vortex.os profile from this browser and restarts VortexOS. Continue?");
+          if (!ok) return;
+
+          try { await disconnectVortexNetwork(); } catch {}
+          await clearStoredBlob();
+          location.reload();
+          return;
+        }
+        
         if (msg.type === "vortex.os.editApp" && msg.appId){
           openEditAppModal(msg.appId);
           return;
@@ -5395,12 +5542,15 @@
 
           let normalizedUrl = "";
           if (type === "url"){
+            const wantsVortexNet = /^vortexnet:/i.test(rawUrl);
+            const candidate = wantsVortexNet ? rawUrl.replace(/^vortexnet:/i, "").trim() : rawUrl;
+
             try{
-              const parsed = new URL(rawUrl);
+              const parsed = new URL(candidate);
               if (!/^https?:$/i.test(parsed.protocol)) throw new Error("bad_protocol");
-              normalizedUrl = parsed.toString();
+              normalizedUrl = (wantsVortexNet ? "vortexnet:" : "") + parsed.toString();
             } catch {
-              err.textContent = "Use a valid http:// or https:// website URL.";
+              err.textContent = "Use a valid http:// or https:// website URL. Prefix it with vortexnet: only when you want that app routed through your Vortex Node.";
               err.style.display = "block";
               return;
             }
@@ -6092,9 +6242,10 @@
         setScreen("os");
         setBoot(true, "Welcome back", "Decrypting your OS…");
         try{
-          const cfg = await decryptConfig(blob, pw);
+          const cfg = migrateDecryptedConfig(await decryptConfig(blob, pw));
           decryptedConfig = cfg;
           currentPassword = pw;
+          await persistConfig();
           await bootIntoOS("Welcome back", "Loading apps and shell…");
         } catch {
           setBoot(false);
@@ -6120,9 +6271,10 @@
         setScreen("os");
         setBoot(true, "Import successful", "Decrypting your imported OS…");
         try{
-          const cfg = await decryptConfig(blob, pw);
+          const cfg = migrateDecryptedConfig(await decryptConfig(blob, pw));
           decryptedConfig = cfg;
           currentPassword = pw;
+          await persistConfig();
           await bootIntoOS("Imported", "Loading apps and shell…");
         } catch {
           setBoot(false);
