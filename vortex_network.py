@@ -93,9 +93,15 @@ except ImportError:  # pragma: no cover
     qrcode = None
 
 APP_NAME = "Vortex Node"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
-DEFAULT_DATA_DIR = pathlib.Path(os.environ.get("VORTEX_NETWORK_DIR", pathlib.Path.cwd() / "vortex_network_state"))
+SCRIPT_PATH = pathlib.Path(__file__).resolve()
+SCRIPT_DIR = SCRIPT_PATH.parent
+
+DEFAULT_DATA_DIR = pathlib.Path(
+    os.environ.get("VORTEX_NETWORK_DIR") or str(SCRIPT_DIR / "vortex_network_state")
+).expanduser().resolve()
+
 CONFIG_PATH = DEFAULT_DATA_DIR / "config.json"
 BROWSER_STATE_DIR = DEFAULT_DATA_DIR / "browser"
 LOG_DIR = DEFAULT_DATA_DIR / "logs"
@@ -103,8 +109,20 @@ SESSION_DIR = DEFAULT_DATA_DIR / "sessions"
 RUNTIME_DIR = DEFAULT_DATA_DIR / "runtime"
 WRAPPER_DIR = RUNTIME_DIR / "wrappers"
 WIREGUARD_DIR = DEFAULT_DATA_DIR / "wireguard"
+
 MAX_BODY_PREVIEW = 1024 * 1024
-DEFAULT_UI_HTML = pathlib.Path.cwd() / "vortexos.html"
+
+DEFAULT_UI_HTML_CANDIDATES = [
+    SCRIPT_DIR / "vortex_os.html",
+    SCRIPT_DIR / "vortexos.html",
+]
+DEFAULT_UI_HTML = next((p for p in DEFAULT_UI_HTML_CANDIDATES if p.exists()), DEFAULT_UI_HTML_CANDIDATES[0])
+
+DEFAULT_UPDATE_OWNER = "MagnetosphereLabs"
+DEFAULT_UPDATE_REPO = "VortexOS"
+DEFAULT_UPDATE_BRANCH = "main"
+DEFAULT_REMOTE_BACKEND_PATH = "vortex_node.py"
+DEFAULT_REMOTE_FRONTEND_PATH = "vortex_os.html"
 DEFAULT_WG_INTERFACE = "vortexwg0"
 DEFAULT_WG_NAMESPACE = "vortexnode-worker"
 DEFAULT_TOR_SOCKS = "socks5://127.0.0.1:9050"
@@ -316,6 +334,206 @@ def apt_install(packages: list[str]) -> None:
     run_command(["apt-get", "update"], check=False)
     run_command(["apt-get", "install", "-y", *packages], check=True)
 
+def restart_current_process(reason: str) -> None:
+    print(reason)
+    os.execv(sys.executable, [sys.executable, str(SCRIPT_PATH), *sys.argv[1:]])
+
+
+def read_text_if_exists(path: pathlib.Path) -> str:
+    try:
+        return path.read_text("utf-8")
+    except Exception:
+        return ""
+
+
+def write_text_atomic(path: pathlib.Path, content: str, *, mode: int = 0o644) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content, "utf-8")
+    os.chmod(tmp, mode)
+    tmp.replace(path)
+
+
+def migrate_config(raw: dict[str, t.Any]) -> dict[str, t.Any]:
+    raw = dict(raw or {})
+    if not raw:
+        return raw
+
+    raw.setdefault("version", 3)
+
+    raw.setdefault("frontend", {})
+    raw["frontend"].setdefault("serve_ui", False)
+    raw["frontend"].setdefault("ui_html_path", str(DEFAULT_UI_HTML))
+
+    raw.setdefault("updates", {})
+    raw["updates"].setdefault("enabled", True)
+    raw["updates"].setdefault("owner", DEFAULT_UPDATE_OWNER)
+    raw["updates"].setdefault("repo", DEFAULT_UPDATE_REPO)
+    raw["updates"].setdefault("branch", DEFAULT_UPDATE_BRANCH)
+    raw["updates"].setdefault("backend_path", DEFAULT_REMOTE_BACKEND_PATH)
+    raw["updates"].setdefault("frontend_path", DEFAULT_REMOTE_FRONTEND_PATH)
+    raw["updates"].setdefault("token_file", str(DEFAULT_UPDATE_TOKEN_FILE))
+
+    return raw
+
+
+def ensure_system_packages() -> None:
+    missing: list[str] = []
+    if which("curl") is None:
+        missing.append("curl")
+    if which("tmux") is None:
+        missing.append("tmux")
+    if which("ip") is None:
+        missing.append("iproute2")
+    if which("wg") is None:
+        missing.extend(["wireguard", "wireguard-tools"])
+    if which("tor") is None:
+        missing.append("tor")
+    if which("ffmpeg") is None:
+        missing.append("ffmpeg")
+
+    missing = sorted(set(missing))
+    if missing:
+        print(f"Installing Ubuntu packages: {', '.join(missing)}")
+        apt_install(missing)
+
+
+def ensure_python_packages() -> bool:
+    missing: list[str] = []
+    if FastAPI is None:
+        missing.append("fastapi")
+    if uvicorn is None:
+        missing.append("uvicorn[standard]")
+    if httpx is None:
+        missing.append("httpx[socks]")
+    if BeautifulSoup is None:
+        missing.extend(["beautifulsoup4", "lxml"])
+    if async_playwright is None:
+        missing.append("playwright")
+    if pyotp is None:
+        missing.append("pyotp")
+    if qrcode is None:
+        missing.append("qrcode[pil]")
+
+    missing = sorted(set(missing))
+    if not missing:
+        return False
+
+    print(f"Installing Python packages: {', '.join(missing)}")
+    run_command([sys.executable, "-m", "pip", "install", "--upgrade", "pip"], check=False)
+    run_command([sys.executable, "-m", "pip", "install", *missing], check=True)
+    return True
+
+
+def playwright_browser_ready() -> bool:
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            return pathlib.Path(p.chromium.executable_path).exists()
+    except Exception:
+        return False
+
+
+def ensure_playwright_browser() -> None:
+    if playwright_browser_ready():
+        return
+
+    print("Installing Playwright Chromium...")
+    run_command([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+    if sys.platform == "linux" and os.geteuid() == 0:
+        run_command([sys.executable, "-m", "playwright", "install-deps", "chromium"], check=True)
+
+
+def bootstrap_runtime() -> None:
+    ensure_dirs()
+    ensure_system_packages()
+    if ensure_python_packages():
+        restart_current_process("Python dependencies installed. Restarting Vortex Node...")
+    ensure_playwright_browser()
+
+
+def current_frontend_path(cfg_raw: dict[str, t.Any] | None = None) -> pathlib.Path:
+    cfg_raw = cfg_raw or {}
+    ui_path = str((cfg_raw.get("frontend") or {}).get("ui_html_path") or DEFAULT_UI_HTML)
+    return pathlib.Path(ui_path).expanduser().resolve()
+
+
+def github_fetch_text(owner: str, repo: str, branch: str, remote_path: str) -> str:
+    import urllib.request
+
+    raw_url = (
+        f"https://raw.githubusercontent.com/"
+        f"{urllib.parse.quote(owner, safe='')}/"
+        f"{urllib.parse.quote(repo, safe='')}/"
+        f"{urllib.parse.quote(branch, safe='')}/"
+        f"{urllib.parse.quote(remote_path, safe='/')}"
+    )
+
+    request = urllib.request.Request(
+        raw_url,
+        headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"}
+    )
+
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return response.read().decode("utf-8")
+
+
+def apply_startup_updates(
+    cfg_raw: dict[str, t.Any] | None = None,
+    *,
+    restart_after_backend_update: bool = True,
+) -> dict[str, t.Any]:
+    cfg_raw = migrate_config(cfg_raw or {})
+    updates = cfg_raw.get("updates") or {}
+    if not updates.get("enabled", True):
+        return {"checked": False, "updated": []}
+
+    owner = str(updates.get("owner") or DEFAULT_UPDATE_OWNER)
+    repo = str(updates.get("repo") or DEFAULT_UPDATE_REPO)
+    branch = str(updates.get("branch") or DEFAULT_UPDATE_BRANCH)
+    backend_remote = str(updates.get("backend_path") or DEFAULT_REMOTE_BACKEND_PATH)
+    frontend_remote = str(updates.get("frontend_path") or DEFAULT_REMOTE_FRONTEND_PATH)
+
+    changed: list[str] = []
+
+    try:
+        remote_backend = github_fetch_text(owner, repo, branch, backend_remote)
+        if remote_backend != read_text_if_exists(SCRIPT_PATH):
+            print(f"Update detected for {SCRIPT_PATH.name}. Applying...")
+            write_text_atomic(SCRIPT_PATH, remote_backend, mode=0o755)
+            changed.append("backend")
+
+        frontend_path = current_frontend_path(cfg_raw)
+        remote_frontend = github_fetch_text(owner, repo, branch, frontend_remote)
+        if remote_frontend != read_text_if_exists(frontend_path):
+            print(f"Update detected for {frontend_path.name}. Applying...")
+            write_text_atomic(frontend_path, remote_frontend, mode=0o644)
+            changed.append("frontend")
+    except Exception as exc:
+        print(f"Startup update check skipped: {exc}")
+        return {"checked": False, "updated": [], "error": str(exc)}
+
+    if "backend" in changed and restart_after_backend_update:
+        restart_current_process("Backend update applied. Restarting Vortex Node...")
+
+    return {"checked": True, "updated": changed}
+
+
+def factory_reset_flow(*, reinstall: bool = False) -> int:
+    print(f"{APP_NAME} factory reset\n")
+    if not prompt_yes_no("Erase ALL node state, config, pairings, logs, and runtime files?", default=False):
+        print("Cancelled.")
+        return 1
+
+    shutil.rmtree(DEFAULT_DATA_DIR, ignore_errors=True)
+    ensure_dirs()
+    print(f"Wiped {DEFAULT_DATA_DIR}")
+
+    if reinstall:
+        return install_flow()
+
+    print("Node state erased. Run `python vortex_network.py install` to configure it again.")
+    return 0
 
 def parse_wireguard_config(raw: str) -> dict[str, t.Any]:
     section = ""
@@ -694,6 +912,15 @@ def ask_install_config() -> dict[str, t.Any]:
     run_on_boot = prompt_yes_no("Install a systemd service (Linux only, requires sudo)?", default=True)
     use_tmux = prompt_yes_no("Use tmux helpers for foreground/background management?", default=True)
 
+    updates_cfg = {
+        "enabled": prompt_yes_no("Check GitHub for backend/frontend updates on startup?", default=True),
+        "owner": DEFAULT_UPDATE_OWNER,
+        "repo": DEFAULT_UPDATE_REPO,
+        "branch": DEFAULT_UPDATE_BRANCH,
+        "backend_path": DEFAULT_REMOTE_BACKEND_PATH,
+        "frontend_path": DEFAULT_REMOTE_FRONTEND_PATH,
+    }
+  
     cfg = {
         "version": 2,
         "created_at": utc_now(),
@@ -763,6 +990,7 @@ def ask_install_config() -> dict[str, t.Any]:
         "ops": {
             "use_tmux": use_tmux,
             "run_on_boot": run_on_boot,
+            "updates": updates_cfg,
         },
     }
 
@@ -1246,7 +1474,9 @@ class BrowserSession:
         await self._wire_page_events()
 
         self.last_status = "starting"
-        await self.page.goto(self.target_url, wait_until="networkidle", timeout=60000)
+        await self.page.goto(self.target_url, wait_until="domcontentloaded", timeout=60000)
+        with contextlib.suppress(Exception):
+            await self.page.wait_for_load_state("load", timeout=15000)
 
         self.analysis = await analyze_page_profile(self.page, self.cfg)
         if self.requested_mode == "hybrid":
@@ -1359,25 +1589,33 @@ class BrowserSession:
     async def navigate(self, url: str) -> None:
         if self.page is None:
             raise HTTPException(400, "session not ready")
-        await self.page.goto(url, wait_until="networkidle", timeout=60000)
+        await self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        with contextlib.suppress(Exception):
+            await self.page.wait_for_load_state("load", timeout=15000)
         await self.refresh_render(reason="navigate")
 
     async def reload(self) -> None:
         if self.page is None:
             raise HTTPException(400, "session not ready")
-        await self.page.reload(wait_until="networkidle", timeout=60000)
+        await self.page.reload(wait_until="domcontentloaded", timeout=60000)
+        with contextlib.suppress(Exception):
+            await self.page.wait_for_load_state("load", timeout=15000)
         await self.refresh_render(reason="reload")
 
     async def go_back(self) -> None:
         if self.page is None:
             raise HTTPException(400, "session not ready")
-        await self.page.go_back(wait_until="networkidle", timeout=60000)
+        await self.page.go_back(wait_until="domcontentloaded", timeout=60000)
+        with contextlib.suppress(Exception):
+            await self.page.wait_for_load_state("load", timeout=15000)
         await self.refresh_render(reason="back")
 
     async def go_forward(self) -> None:
         if self.page is None:
             raise HTTPException(400, "session not ready")
-        await self.page.go_forward(wait_until="networkidle", timeout=60000)
+        await self.page.go_forward(wait_until="domcontentloaded", timeout=60000)
+        with contextlib.suppress(Exception):
+            await self.page.wait_for_load_state("load", timeout=15000)
         await self.refresh_render(reason="forward")
 
     async def resize(self, width: int, height: int) -> None:
@@ -1661,11 +1899,21 @@ def rewrite_document_for_vortex(session: BrowserSession, raw_html: str, base_url
         "form": ["action"],
     }
 
+    viewer = urllib.parse.quote(session.viewer_token, safe="")
+
     def asset_url(original: str) -> str:
-        return f"/api/browser/sessions/{session.session_id}/asset?u={urllib.parse.quote(urllib.parse.urljoin(base_url, original), safe='')}"
+        absolute = urllib.parse.urljoin(base_url, original)
+        return (
+            f"/api/browser/sessions/{session.session_id}/asset"
+            f"?viewer={viewer}&u={urllib.parse.quote(absolute, safe='')}"
+        )
 
     def nav_url(original: str) -> str:
-        return f"/api/browser/sessions/{session.session_id}/render?u={urllib.parse.quote(urllib.parse.urljoin(base_url, original), safe='')}"
+        absolute = urllib.parse.urljoin(base_url, original)
+        return (
+            f"/api/browser/sessions/{session.session_id}/render"
+            f"?viewer={viewer}&u={urllib.parse.quote(absolute, safe='')}"
+        )
 
     for tag_name, attrs in url_attrs.items():
         for node in soup.find_all(tag_name):
@@ -2578,6 +2826,7 @@ def doctor() -> int:
 
 
 def install_flow() -> int:
+    bootstrap_runtime()
     cfg = ask_install_config()
     print(f"\nSaved config to {CONFIG_PATH}\n")
 
@@ -2605,13 +2854,17 @@ def install_flow() -> int:
 
 
 def run_server() -> int:
-    if uvicorn is None or FastAPI is None:
-        print("fastapi and uvicorn are required. See the install guide.")
-        return 1
+    cfg_raw = migrate_config(read_json(CONFIG_PATH, {})) if CONFIG_PATH.exists() else {}
+    apply_startup_updates(cfg_raw, restart_after_backend_update=True)
+    bootstrap_runtime()
+
     if not CONFIG_PATH.exists():
         print(f"Missing config: {CONFIG_PATH}. Run: python vortex_network.py install")
         return 1
-    cfg = NodeConfig(read_json(CONFIG_PATH, {}))
+
+    cfg_raw = migrate_config(read_json(CONFIG_PATH, {}))
+    write_json(CONFIG_PATH, cfg_raw)
+    cfg = NodeConfig(cfg_raw)
     app = create_app(cfg)
     host = cfg.server.get("host", "127.0.0.1")
     port = int(cfg.server.get("port", 8787))
@@ -2632,6 +2885,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("install", help="interactive install/config wizard")
     sub.add_parser("run", help="run the node")
     sub.add_parser("doctor", help="check dependencies and config")
+    sub.add_parser("bootstrap", help="install or repair runtime dependencies")
+    sub.add_parser("update", help="check GitHub for vortex_node.py and vortex_os.html updates")
+    sub.add_parser("factory-reset", help="wipe all node state and optionally reinstall")
     sub.add_parser("service-install", help="install systemd service (Linux)")
     sub.add_parser("print-nginx", help="print example Nginx/Certbot instructions")
     args = parser.parse_args(argv)
@@ -2649,6 +2905,17 @@ def main(argv: list[str] | None = None) -> int:
         cfg = NodeConfig(read_json(CONFIG_PATH, {"server": {"host": "127.0.0.1", "port": 8787, "public_base_url": "https://node.example.com"}}))
         print_nginx_snippet(cfg)
         return 0
+    if args.command == "bootstrap":
+        bootstrap_runtime()
+        print("Runtime dependencies are ready.")
+        return 0
+    if args.command == "update":
+        result = apply_startup_updates(read_json(CONFIG_PATH, {}) if CONFIG_PATH.exists() else {}, restart_after_backend_update=False)
+        print(json.dumps(result, indent=2))
+        return 0
+    if args.command == "factory-reset":
+        reinstall = prompt_yes_no("Run the installer again after wiping the node?", default=True)
+        return factory_reset_flow(reinstall=reinstall)
     return 1
 
 
