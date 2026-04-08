@@ -365,6 +365,16 @@ def migrate_config(raw: dict[str, t.Any]) -> dict[str, t.Any]:
     raw["frontend"].setdefault("serve_ui", False)
     raw["frontend"].setdefault("ui_html_path", str(DEFAULT_UI_HTML))
 
+    raw.setdefault("ops", {})
+
+    # Migrate legacy installer output where updater settings were stored under ops.updates.
+    legacy_updates = raw["ops"].get("updates")
+    if isinstance(legacy_updates, dict):
+        raw.setdefault("updates", {})
+        for key, value in legacy_updates.items():
+            raw["updates"].setdefault(key, value)
+        raw["ops"].pop("updates", None)
+
     raw.setdefault("updates", {})
     raw["updates"].setdefault("enabled", True)
     raw["updates"].setdefault("owner", DEFAULT_UPDATE_OWNER)
@@ -372,7 +382,6 @@ def migrate_config(raw: dict[str, t.Any]) -> dict[str, t.Any]:
     raw["updates"].setdefault("branch", DEFAULT_UPDATE_BRANCH)
     raw["updates"].setdefault("backend_path", DEFAULT_REMOTE_BACKEND_PATH)
     raw["updates"].setdefault("frontend_path", DEFAULT_REMOTE_FRONTEND_PATH)
-    raw["updates"].setdefault("token_file", str(DEFAULT_UPDATE_TOKEN_FILE))
 
     return raw
 
@@ -987,10 +996,10 @@ def ask_install_config() -> dict[str, t.Any]:
             "totp": True,
             "frontend_serving": True,
         },
+        "updates": updates_cfg,
         "ops": {
             "use_tmux": use_tmux,
             "run_on_boot": run_on_boot,
-            "updates": updates_cfg,
         },
     }
 
