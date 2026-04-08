@@ -2672,7 +2672,7 @@ def install_systemd_service() -> None:
 
     service_path = pathlib.Path("/etc/systemd/system/vortex-node.service")
     python_exe = sys.executable
-    exec_cmd = f"{python_exe} {pathlib.Path(__file__).resolve()} run"
+    exec_cmd = f"{shlex_quote(python_exe)} {shlex_quote(str(SCRIPT_PATH))} run"
 
     content = f"""[Unit]
 Description={APP_NAME}
@@ -2681,7 +2681,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory={pathlib.Path.cwd()}
+WorkingDirectory={SCRIPT_DIR}
+EnvironmentFile=-/etc/default/vortex-node
 ExecStart={exec_cmd}
 Restart=on-failure
 RestartSec=3
