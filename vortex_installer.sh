@@ -82,7 +82,11 @@ printf 'The next step is Vortex itself running its install flow.\n'
 printf 'That Python installer handles the heavier setup from here.\n'
 printf '\n'
 
-"${VENV_DIR}/bin/python" "${INSTALL_DIR}/${APP_FILE}" install
+if [[ -r /dev/tty ]]; then
+  "${VENV_DIR}/bin/python" "${INSTALL_DIR}/${APP_FILE}" install </dev/tty
+else
+  die "No interactive TTY available for the Python installer."
+fi
 
 if command -v systemctl >/dev/null 2>&1; then
   if systemctl list-unit-files 2>/dev/null | grep -q '^vortex-node\.service'; then
