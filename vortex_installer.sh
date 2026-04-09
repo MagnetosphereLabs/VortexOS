@@ -88,18 +88,20 @@ else
   die "No interactive TTY available for the Python installer."
 fi
 
+SERVICE_PATH="/etc/systemd/system/vortex-node.service"
+
 if command -v systemctl >/dev/null 2>&1; then
-  if systemctl list-unit-files 2>/dev/null | grep -q '^vortex-node\.service'; then
-    log "Systemd service detected; ensuring it is running"
-    systemctl daemon-reload || true
-    systemctl enable --now vortex-node.service || true
+  if [[ -f "${SERVICE_PATH}" ]]; then
+    log "Systemd service file found; ensuring vortex-node is running"
+    systemctl daemon-reload
+    systemctl enable --now vortex-node.service
 
     for _ in 1 2 3 4 5 6 7 8 9 10; do
       if systemctl is-active --quiet vortex-node.service; then
         log "Vortex is running as the vortex-node systemd service"
         printf '\n'
         printf 'Check status with:\n'
-        printf '  sudo systemctl status vortex-node\n'
+        printf '  sudo systemctl status vortex-node --no-pager -l\n'
         printf '\n'
         printf 'Local health check:\n'
         printf '  curl http://127.0.0.1:8787/healthz\n'
@@ -109,12 +111,15 @@ if command -v systemctl >/dev/null 2>&1; then
       sleep 1
     done
 
-    printf '\nSystemd service exists but did not become active.\n' >&2
+    printf '\nThe vortex-node service file exists but the service did not become active.\n' >&2
     printf 'Check logs with:\n' >&2
     printf '  sudo journalctl -u vortex-node -n 100 --no-pager\n' >&2
     exit 1
   fi
 fi
+
+log "No vortex-node systemd service file found; starting Vortex directly"
+exec "${VENV_DIR}/bin/python" "${INSTALL_DIR}/${APP_FILE}" run
 
 log "No vortex-node service detected; starting Vortex directly"
 exec "${VENV_DIR}/bin/python" "${INSTALL_DIR}/${APP_FILE}" run
