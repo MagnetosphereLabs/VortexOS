@@ -249,9 +249,24 @@ def b64url_decode(data: str) -> bytes:
     return base64.urlsafe_b64decode(data + padding)
 
 
-def hash_password(password: str, *, n: int = 2**15, r: int = 8, p: int = 1) -> str:
+def hash_password(
+    password: str,
+    *,
+    n: int = 2**15,
+    r: int = 8,
+    p: int = 1,
+    maxmem: int = 256 * 1024 * 1024,
+) -> str:
     salt = secrets.token_bytes(16)
-    dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=64)
+    dk = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=n,
+        r=r,
+        p=p,
+        dklen=64,
+        maxmem=maxmem,
+    )
     return f"scrypt${n}${r}${p}${b64url(salt)}${b64url(dk)}"
 
 
@@ -262,7 +277,15 @@ def verify_password(password: str, stored: str) -> bool:
             return False
         salt = b64url_decode(salt_b64)
         expected = b64url_decode(dk_b64)
-        actual = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=int(n), r=int(r), p=int(p), dklen=len(expected))
+        actual = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt,
+            n=int(n),
+            r=int(r),
+            p=int(p),
+            dklen=len(expected),
+            maxmem=256 * 1024 * 1024,
+        )
         return hmac.compare_digest(actual, expected)
     except Exception:
         return False
