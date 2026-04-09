@@ -3044,6 +3044,7 @@
         clock: "",
         settings: "",
         "vortex-browser": "",
+        "vortex-terminal": "",
         "vortex-chat": "",
         "vortex-vault": "https://vortex.mglabs.dev"
       };
@@ -3131,17 +3132,6 @@
         { id: "vortex-chat", name: "Vortex Chat", icon: svgToDataUrl(BUILTIN_SVGS.chat),        tpl: "tpl-vortex-chat", editable: false, kind: "vortex" },
         { id: "vortex-vault",name: "Vortex Vault",icon: svgToDataUrl(BUILTIN_SVGS.vault),       tpl: "tpl-vortex-vault",editable: false, kind: "vortex", sandboxMode: "trusted" }
       ].sort((a,b)=>a.name.localeCompare(b.name));
-      
-      const BUILTIN_URLS = {
-        calculator: "",
-        calendar: "",
-        clock: "",
-        settings: "",
-        "vortex-browser": "",
-        "vortex-terminal": "",
-        "vortex-chat": "",
-        "vortex-vault": "https://vortex.mglabs.dev"
-      };
 
       const el = (id) => document.getElementById(id);
 
