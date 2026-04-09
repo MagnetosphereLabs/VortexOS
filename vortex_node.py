@@ -224,7 +224,22 @@ def prompt_choice(text: str, choices: list[tuple[str, str]], default_key: str) -
             return value
         print(f"Choose one of: {', '.join(sorted(valid))}")
 
-
+def prompt_int(text: str, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
+    while True:
+        value = prompt(text, default=str(default))
+        try:
+            number = int(value)
+        except ValueError:
+            print("Please enter a whole number.")
+            continue
+        if minimum is not None and number < minimum:
+            print(f"Please enter a value >= {minimum}.")
+            continue
+        if maximum is not None and number > maximum:
+            print(f"Please enter a value <= {maximum}.")
+            continue
+        return number
+  
 def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
@@ -1200,7 +1215,7 @@ def ask_install_config() -> dict[str, t.Any]:
         bind_mode = "localhost"
 
     host = "127.0.0.1" if bind_mode == "localhost" else "0.0.0.0"
-    port = int(prompt("Node port", default="8787"))
+    port = prompt_int("Node port", default=8787, minimum=1, maximum=65535)
 
     public_base_default = "https://node.example.com" if deployment_mode == "public" else f"http://{local_ip_guess()}:{port}"
     public_base_url = prompt(
@@ -1290,9 +1305,9 @@ def ask_install_config() -> dict[str, t.Any]:
         default_key="hybrid",
     )
 
-    max_sessions = int(prompt("Maximum simultaneous browser windows", default="4"))
-    max_tabs_per_session = int(prompt("Maximum tabs per browser window", default=str(MAX_TABS_PER_SESSION)))
-    max_clients = int(prompt("Maximum simultaneous API/browser clients", default="12"))
+    max_sessions = prompt_int("Maximum simultaneous browser windows", default=4, minimum=1)
+    max_tabs_per_session = prompt_int("Maximum tabs per browser window", default=MAX_TABS_PER_SESSION, minimum=1)
+    max_clients = prompt_int("Maximum simultaneous API/browser clients", default=12, minimum=1)
 
     frame_ancestors = parse_origin_list(prompt(
         "Allowed Vortex OS origins (comma-separated)",
