@@ -965,6 +965,7 @@
         <div class="row">
           <button id="btnSetupNew" class="btn btnPrimary">Set up</button>
           <button id="btnSetupRestore" class="btn">Restore from a vortex.os file</button>
+          <button id="btnSetupRestoreNode" class="btn">Restore from Vortex Node</button>
         </div>
       </div>
     </div>
@@ -987,7 +988,10 @@
         </div>
 
         <div class="row between">
-          <button id="btnReturnImport" class="btn btnGhost">Load different profile</button>
+          <div class="row" style="margin-top:0;">
+            <button id="btnReturnImport" class="btn btnGhost">Load different profile</button>
+            <button id="btnReturnRestoreNode" class="btn btnGhost">Restore from Vortex Node</button>
+          </div>
           <button id="btnReturnUnlock" class="btn btnPrimary">Decrypt</button>
         </div>
 
@@ -2010,7 +2014,7 @@
       <iframe
         id="browserFrame"
         referrerpolicy="no-referrer"
-        allow="autoplay; encrypted-media; microphone"
+        allow="autoplay; encrypted-media; microphone; camera"
         sandbox="allow-scripts allow-forms allow-same-origin allow-downloads">
       </iframe>
     </div>
@@ -2040,7 +2044,6 @@
 
       function renderTabs(){
         tabsEl.innerHTML = "";
-
         const tabs = Array.isArray(state.tabs) ? state.tabs : [];
         for (const tab of tabs){
           const item = document.createElement("div");
@@ -2114,17 +2117,6 @@
 
         if (msg.type === "vortex.browser.state"){
           Object.assign(state, msg.state || {});
-          render();
-          return;
-        }
-
-        if (msg.type === "vortex.remote.session_update"){
-          const payload = msg.payload || {};
-          if (payload.url) state.currentUrl = payload.url;
-          if (payload.title) state.title = payload.title;
-          if (payload.render_mode) state.mode = payload.render_mode;
-          if (Array.isArray(payload.tabs)) state.tabs = payload.tabs;
-          if (payload.active_tab_id) state.activeTabId = payload.active_tab_id;
           render();
         }
       });
@@ -2219,6 +2211,80 @@
 
       window.addEventListener("message", (e)=>{
         if (e.data && e.data.type === "vortex.theme.changed") syncTheme();
+      });
+    })();
+  </script>
+</body>
+</html>
+  </template>
+
+  <template id="tpl-vortex-terminal">
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Terminal</title>
+  <style>
+    html,body{height:100%;margin:0;background:#050714;color:#f7fbff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+    .wrap{height:100%;display:flex;flex-direction:column;padding:10px;gap:10px;box-sizing:border-box;}
+    .out{flex:1;min-height:0;overflow:auto;border-radius:14px;padding:12px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.08);white-space:pre-wrap;word-break:break-word;}
+    .bar{display:flex;gap:8px;align-items:center;}
+    .cwd{padding:10px 12px;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);font-size:12px;color:rgba(200,220,255,0.82);}
+    .inp{flex:1;min-width:0;border-radius:999px;border:1px solid rgba(255,255,255,0.10);background:rgba(6,8,22,0.92);color:#f7fbff;padding:10px 14px;outline:none;font:inherit;}
+    .btn{border:none;border-radius:999px;padding:10px 14px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.10);color:#f7fbff;cursor:pointer;font-weight:700;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="termOut" class="out"></div>
+    <form id="termForm" class="bar">
+      <div id="termCwd" class="cwd">~</div>
+      <input id="termInput" class="inp" type="text" placeholder="Enter a shell command" autocomplete="off" />
+      <button id="termClear" class="btn" type="button">Clear</button>
+    </form>
+  </div>
+
+  <script>
+    (function(){
+      const out = document.getElementById("termOut");
+      const form = document.getElementById("termForm");
+      const input = document.getElementById("termInput");
+      const cwdEl = document.getElementById("termCwd");
+      const clearBtn = document.getElementById("termClear");
+
+      function append(text){
+        out.textContent += text || "";
+        out.scrollTop = out.scrollHeight;
+      }
+
+      form.addEventListener("submit", (e)=>{
+        e.preventDefault();
+        const command = (input.value || "").trim();
+        if (!command) return;
+        append(`$ ${command}\n`);
+        parent.postMessage({ type: "vortex.terminal.command", command }, "*");
+        input.value = "";
+      });
+
+      clearBtn.addEventListener("click", ()=>{
+        out.textContent = "";
+      });
+
+      window.addEventListener("message", (e)=>{
+        const msg = e.data;
+        if (!msg || typeof msg !== "object") return;
+        if (msg.type === "vortex.terminal.state"){
+          const state = msg.state || {};
+          cwdEl.textContent = state.cwd || "~";
+          if (state.reset) out.textContent = "";
+          if (state.output) append(state.output + (state.output.endsWith("\n") ? "" : "\n"));
+          input.disabled = !state.connected;
+        }
+      });
+
+      window.addEventListener("DOMContentLoaded", ()=>{
+        parent.postMessage({ type: "vortex.terminal.ready" }, "*");
       });
     })();
   </script>
@@ -2593,10 +2659,20 @@
         </div>
 
         <div class="divider"></div>
-
+        
         <h2>Status</h2>
         <div class="list">
           <div class="item" id="networkStatusCard"></div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <h2>Node maintenance</h2>
+        <div class="row">
+          <button id="btnNetworkUploadBlob" class="btn">Upload OS to node</button>
+          <button id="btnNetworkDownloadBlob" class="btn">Download OS from node</button>
+          <button id="btnNodeUpdate" class="btn">Update node</button>
+          <button id="btnNodeReset" class="btn danger">Reset node state</button>
         </div>
       </section>
       
@@ -3035,53 +3111,37 @@
       }
 
       const BUILTIN_SVGS = {
-        calculator: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="6" y="3" width="12" height="18" rx="3"/>
-          <rect x="8" y="5.5" width="8" height="3" rx="1"/>
-          <path d="M9 11h.01M12 11h.01M15 11h.01"/>
-          <path d="M9 14h.01M12 14h.01M15 14h.01"/>
-          <path d="M9 17h.01M12 17h.01M15 17h.01"/>
-        </svg>`,
-        calendar: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="4" y="5" width="16" height="15" rx="3"/>
-          <path d="M8 3v4M16 3v4M4 9h16"/>
-          <path d="M8 12h.01M12 12h.01M16 12h.01"/>
-          <path d="M8 15h.01M12 15h.01M16 15h.01"/>
-        </svg>`,
-        clock: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="8"/>
-          <path d="M12 8v5l3 2"/>
-        </svg>`,
-        settings: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.15.09a2 2 0 0 1-2-.03l-.16-.1a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.18a2 2 0 0 1-1 1.73l-.15.1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.16-.1a2 2 0 0 1 2-.03l.15.09a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.15-.09a2 2 0 0 1 2 .03l.16.1a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.73v-.18a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.16.1a2 2 0 0 1-2 .03l-.15-.09a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>`,
-        browser: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="9"/>
-          <path d="M3 9h18"/>
-          <path d="M9 3a16 16 0 0 0 0 18"/>
-          <path d="M15 3a16 16 0 0 1 0 18"/>
-        </svg>`,
-        chat: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 14a4 4 0 0 1-4 4H9l-5 3V6a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v8Z"/>
-          <path d="M8 9h8M8 12h6"/>
-        </svg>`,
-        vault: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="5" y="10" width="14" height="11" rx="3"/>
-          <path d="M8 10V8a4 4 0 0 1 8 0v2"/>
-          <path d="M12 15v2"/>
-        </svg>`
+        calculator: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="12" height="18" rx="3"/><rect x="8" y="5.5" width="8" height="3" rx="1"/><path d="M9 11h.01M12 11h.01M15 11h.01"/><path d="M9 14h.01M12 14h.01M15 14h.01"/><path d="M9 17h.01M12 17h.01M15 17h.01"/></svg>`,
+        calendar: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M8 3v4M16 3v4M4 9h16"/><path d="M8 12h.01M12 12h.01M16 12h.01"/><path d="M8 15h.01M12 15h.01M16 15h.01"/></svg>`,
+        clock: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>`,
+        settings: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.15.09a2 2 0 0 1-2-.03l-.16-.1a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.18a2 2 0 0 1-1 1.73l-.15.1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.16-.1a2 2 0 0 1 2-.03l.15.09a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.15-.09a2 2 0 0 1 2 .03l.16.1a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.73v-.18a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.16.1a2 2 0 0 1-2 .03l-.15-.09a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`,
+        browser: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 9h18"/><path d="M9 3a16 16 0 0 0 0 18"/><path d="M15 3a16 16 0 0 1 0 18"/></svg>`,
+        chat: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14a4 4 0 0 1-4 4H9l-5 3V6a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v8Z"/><path d="M8 9h8M8 12h6"/></svg>`,
+        vault: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V8a4 4 0 0 1 8 0v2"/><path d="M12 15v2"/></svg>`,
+        terminal: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9l3 3-3 3"/><path d="M13 15h4"/></svg>`
       };
-
+      
       const BUILTINS = [
         { id: "calculator",  name: "Calculator",  icon: svgToDataUrl(BUILTIN_SVGS.calculator),  tpl: "tpl-calculator",  editable: true,  kind: "system", sandboxMode: "trusted" },
         { id: "calendar",    name: "Calendar",    icon: svgToDataUrl(BUILTIN_SVGS.calendar),    tpl: "tpl-calendar",    editable: true,  kind: "system" },
         { id: "clock",       name: "Clock",       icon: svgToDataUrl(BUILTIN_SVGS.clock),       tpl: "tpl-clock",       editable: true,  kind: "system" },
         { id: "settings",    name: "Settings",    icon: svgToDataUrl(BUILTIN_SVGS.settings),    tpl: "tpl-settings",    editable: false, kind: "system" },
         { id: "vortex-browser", name: "Browser",  icon: svgToDataUrl(BUILTIN_SVGS.browser),     tpl: "tpl-vortex-browser", editable: false, kind: "vortex", sandboxMode: "trusted" },
+        { id: "vortex-terminal", name: "Terminal", icon: svgToDataUrl(BUILTIN_SVGS.terminal),   tpl: "tpl-vortex-terminal", editable: false, kind: "vortex", sandboxMode: "trusted" },
         { id: "vortex-chat", name: "Vortex Chat", icon: svgToDataUrl(BUILTIN_SVGS.chat),        tpl: "tpl-vortex-chat", editable: false, kind: "vortex" },
         { id: "vortex-vault",name: "Vortex Vault",icon: svgToDataUrl(BUILTIN_SVGS.vault),       tpl: "tpl-vortex-vault",editable: false, kind: "vortex", sandboxMode: "trusted" }
       ].sort((a,b)=>a.name.localeCompare(b.name));
+      
+      const BUILTIN_URLS = {
+        calculator: "",
+        calendar: "",
+        clock: "",
+        settings: "",
+        "vortex-browser": "",
+        "vortex-terminal": "",
+        "vortex-chat": "",
+        "vortex-vault": "https://vortex.mglabs.dev"
+      };
 
       const el = (id) => document.getElementById(id);
 
@@ -3250,7 +3310,7 @@
           createdAt: Date.now(),
           profile: { username: "Vortex User", pfpDataUrl: null },
           appearance: { themeId: "neon-blue" },
-
+      
           os: {
             clock24h: false,
             showSeconds: false,
@@ -3281,7 +3341,7 @@
               }
             }
           },
-
+      
           apps: {
             user: [],
             overrides: {},
@@ -3491,17 +3551,45 @@
         return `https://duckduckgo.com/?t=h_&q=${q}&ia=web`;
       }
 
-      const vortexBrowserState = {
-        sessionId: "",
-        embedUrl: "",
-        currentUrl: "",
-        title: "",
-        mode: "hybrid",
-        tabs: [],
-        activeTabId: null,
-        routeMode: "default",
-        lastOpenedAt: 0
-      };
+      let pendingNodeBootstrap = null;
+      
+      const remoteBrowserWindows = {};
+      const terminalStates = {};
+      
+      function baseAppIdFromWindowId(windowId){
+        return String(windowId || "").split("@")[0];
+      }
+      
+      function browserWindowState(windowId){
+        if (!remoteBrowserWindows[windowId]){
+          remoteBrowserWindows[windowId] = {
+            sessionId: "",
+            embedUrl: "",
+            currentUrl: "",
+            title: "",
+            mode: "hybrid",
+            tabs: [],
+            activeTabId: null,
+            routeMode: "default",
+            wsUrl: "",
+            ws: null,
+            lastOpenedAt: 0
+          };
+        }
+        return remoteBrowserWindows[windowId];
+      }
+      
+      function terminalWindowState(windowId){
+        if (!terminalStates[windowId]){
+          terminalStates[windowId] = {
+            sessionId: "",
+            cwd: "~",
+            output: "",
+            connected: false
+          };
+        }
+        return terminalStates[windowId];
+      }
 
       function networkDefaults(){
         return {
@@ -3520,7 +3608,7 @@
           nodeSettings: {
             stripCommonJunk: true,
             blockAggressivePopups: true,
-            screenshotFps: 4,
+            screenshotFps: 30,
             screenshotQuality: 85,
             totpEnabled: false,
             pairedDevices: []
@@ -4870,8 +4958,146 @@
         if (!decryptedConfig || !currentPassword) return;
         const enc = await encryptConfig(decryptedConfig, currentPassword);
         await writeStoredBlob(enc);
+        if (networkConnected()){
+          try{
+            await nodeFetch("/api/profile/blob", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(enc)
+            });
+          } catch {}
+        }
       }
 
+      async function restoreBlobFromNode(nodeUrl, username, password, otp){
+        const normalized = normalizeNodeUrl(nodeUrl);
+        const deviceId = (crypto.randomUUID ? crypto.randomUUID() : (`vortex-${Date.now()}-${Math.random().toString(16).slice(2)}`));
+      
+        const loginRes = await fetch(`${normalized}/api/auth/login`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            username,
+            password,
+            otp: otp || "",
+            remember_device: true,
+            device_id: deviceId,
+            device_label: `VortexOS ${navigator.platform || "device"}`
+          }),
+          mode: "cors",
+          credentials: "omit"
+        });
+      
+        const loginData = await loginRes.json().catch(()=>({}));
+        if (!loginRes.ok){
+          throw new Error(loginData && loginData.detail ? String(loginData.detail) : "Unable to log into Vortex Node.");
+        }
+      
+        const blobRes = await fetch(`${normalized}/api/profile/blob`, {
+          headers: { Authorization: `Bearer ${loginData.access_token}` },
+          mode: "cors",
+          credentials: "omit"
+        });
+      
+        if (!blobRes.ok){
+          const maybeData = await blobRes.json().catch(()=>({}));
+          throw new Error(maybeData && maybeData.detail ? String(maybeData.detail) : "No synced Vortex OS blob was found on this node.");
+        }
+      
+        const blob = await blobRes.json();
+        await writeStoredBlob(blob);
+      
+        pendingNodeBootstrap = {
+          nodeUrl: normalized,
+          username: String(username || "").trim(),
+          accessToken: loginData.access_token || "",
+          pairingToken: loginData.pairing_token || "",
+          deviceId,
+        };
+      
+        setScreen("unlock");
+        closeModal();
+      }
+      
+      function openNodeRestoreModal(){
+        const wrap = document.createElement("div");
+      
+        const hint = document.createElement("div");
+        hint.className = "hint";
+        hint.textContent = "Log into your Vortex Node and download your encrypted Vortex OS profile from it.";
+      
+        const nodeField = document.createElement("div");
+        nodeField.className = "field";
+        const nodeLabel = document.createElement("label");
+        nodeLabel.textContent = "Node URL";
+        const nodeInput = document.createElement("input");
+        nodeInput.type = "text";
+        nodeInput.placeholder = "https://example.com";
+        nodeField.appendChild(nodeLabel);
+        nodeField.appendChild(nodeInput);
+      
+        const userField = document.createElement("div");
+        userField.className = "field";
+        const userLabel = document.createElement("label");
+        userLabel.textContent = "Username";
+        const userInput = document.createElement("input");
+        userInput.type = "text";
+        userInput.placeholder = "owner";
+        userField.appendChild(userLabel);
+        userField.appendChild(userInput);
+      
+        const pwField = document.createElement("div");
+        pwField.className = "field";
+        const pwLabel = document.createElement("label");
+        pwLabel.textContent = "Password";
+        const pwInput = document.createElement("input");
+        pwInput.type = "password";
+        pwInput.placeholder = "Node password";
+        pwField.appendChild(pwLabel);
+        pwField.appendChild(pwInput);
+      
+        const otpField = document.createElement("div");
+        otpField.className = "field";
+        const otpLabel = document.createElement("label");
+        otpLabel.textContent = "Authenticator code (only if 2FA is enabled)";
+        const otpInput = document.createElement("input");
+        otpInput.type = "text";
+        otpInput.placeholder = "123456";
+        otpField.appendChild(otpLabel);
+        otpField.appendChild(otpInput);
+      
+        const err = document.createElement("div");
+        err.className = "error";
+        err.style.display = "none";
+      
+        wrap.appendChild(hint);
+        wrap.appendChild(nodeField);
+        wrap.appendChild(userField);
+        wrap.appendChild(pwField);
+        wrap.appendChild(otpField);
+        wrap.appendChild(err);
+      
+        const btnCancel = document.createElement("button");
+        btnCancel.className = "btn";
+        btnCancel.textContent = "Cancel";
+        btnCancel.addEventListener("click", closeModal);
+      
+        const btnLoad = document.createElement("button");
+        btnLoad.className = "btn btnPrimary";
+        btnLoad.textContent = "Download encrypted OS";
+        btnLoad.addEventListener("click", async ()=>{
+          err.style.display = "none";
+          try{
+            await restoreBlobFromNode(nodeInput.value, userInput.value, pwInput.value, otpInput.value);
+          } catch (e){
+            err.textContent = e && e.message ? e.message : "Unable to restore from Vortex Node.";
+            err.style.display = "block";
+          }
+        });
+      
+        openModal("Restore from Vortex Node", wrap, [btnCancel, btnLoad]);
+      }
+      
       function appLaunchModeFor(appId){
         const appPrefs = decryptedConfig?.os?.appLaunchPrefs || {};
         const explicit = appPrefs[appId];
@@ -5183,6 +5409,62 @@
           return;
         }
 
+        if (msg.id === "btnNetworkUploadBlob"){
+          try{
+            const blob = await readStoredBlob();
+            if (!blob) throw new Error("No local Vortex OS blob exists yet.");
+            await nodeFetch("/api/profile/blob", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(blob)
+            });
+            alert("Encrypted OS blob uploaded to the node.");
+          } catch (err){
+            alert(err && err.message ? err.message : "Unable to upload the encrypted OS blob.");
+          }
+          return;
+        }
+        
+        if (msg.id === "btnNetworkDownloadBlob"){
+          try{
+            const res = await nodeFetch("/api/profile/blob");
+            const blob = await res.json();
+            await writeStoredBlob(blob);
+            alert("Encrypted OS blob downloaded from the node. Reloading now.");
+            location.reload();
+          } catch (err){
+            alert(err && err.message ? err.message : "Unable to download the encrypted OS blob.");
+          }
+          return;
+        }
+        
+        if (msg.id === "btnNodeUpdate"){
+          try{
+            const res = await nodeFetch("/api/node/update", { method: "POST" });
+            const data = await res.json();
+            alert(`Node update finished. Updated: ${(data.updated || []).join(", ") || "nothing"}`);
+          } catch (err){
+            alert(err && err.message ? err.message : "Unable to update the node.");
+          }
+          return;
+        }
+        
+        if (msg.id === "btnNodeReset"){
+          const ok = confirm("Reset backend node state? This clears trusted devices, synced blobs, browser sessions, and runtime state.");
+          if (!ok) return;
+          try{
+            await nodeFetch("/api/node/reset", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ preserve_config: true, clear_synced_profiles: true })
+            });
+            alert("Node backend state reset complete.");
+          } catch (err){
+            alert(err && err.message ? err.message : "Unable to reset the node.");
+          }
+          return;
+        }
+        
         if (msg.type === "vortex.browser.ready"){
           syncBrowserIframe();
           return;
@@ -6139,6 +6421,11 @@
 
         el("btnUnlock").addEventListener("click", unlockImported);
 
+        const btnSetupRestoreNode = el("btnSetupRestoreNode");
+        const btnReturnRestoreNode = el("btnReturnRestoreNode");
+        if (btnSetupRestoreNode) btnSetupRestoreNode.addEventListener("click", ()=> openNodeRestoreModal());
+        if (btnReturnRestoreNode) btnReturnRestoreNode.addEventListener("click", ()=> openNodeRestoreModal());
+        
         function bindEnterSubmit(inputId, buttonId){
           const inp = el(inputId);
           const btn = el(buttonId);
@@ -6462,6 +6749,20 @@
 
         setBodyMode();
 
+        if (pendingNodeBootstrap){
+          const n = getNetworkCfg();
+          n.enabled = true;
+          n.nodeUrl = pendingNodeBootstrap.nodeUrl;
+          n.username = pendingNodeBootstrap.username;
+          n.accessToken = pendingNodeBootstrap.accessToken;
+          n.pairingToken = pendingNodeBootstrap.pairingToken;
+          n.deviceId = pendingNodeBootstrap.deviceId;
+          n.status = "connected";
+          n.lastConnectedAt = Date.now();
+          pendingNodeBootstrap = null;
+          await persistConfig();
+        }
+        
         const net = getNetworkCfg();
         if (net.enabled && net.nodeUrl && (net.pairingToken || net.accessToken)){
           try{
