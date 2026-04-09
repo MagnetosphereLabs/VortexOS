@@ -92,6 +92,15 @@ try:
 except ImportError:  # pragma: no cover
     qrcode = None
 
+try:
+    import av
+    from aiortc import RTCPeerConnection, RTCConfiguration, RTCIceServer, RTCSessionDescription
+    from aiortc.contrib.media import MediaPlayer
+except ImportError:  # pragma: no cover
+    av = None
+    RTCPeerConnection = RTCConfiguration = RTCIceServer = RTCSessionDescription = None
+    MediaPlayer = None
+
 APP_NAME = "Vortex Node"
 APP_VERSION = "0.3.0"
 
@@ -121,12 +130,22 @@ DEFAULT_UI_HTML = next((p for p in DEFAULT_UI_HTML_CANDIDATES if p.exists()), DE
 DEFAULT_UPDATE_OWNER = "MagnetosphereLabs"
 DEFAULT_UPDATE_REPO = "VortexOS"
 DEFAULT_UPDATE_BRANCH = "main"
-DEFAULT_REMOTE_BACKEND_PATH = "vortex_node.py"
+DEFAULT_REMOTE_BACKEND_PATH = SCRIPT_PATH.name
 DEFAULT_REMOTE_FRONTEND_PATH = "vortex_os.html"
 DEFAULT_WG_INTERFACE = "vortexwg0"
 DEFAULT_WG_NAMESPACE = "vortexnode-worker"
 DEFAULT_TOR_SOCKS = "socks5://127.0.0.1:9050"
+
 PAIR_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 180  # 180 days
+
+SYNCED_BLOB_DIR = DEFAULT_DATA_DIR / "synced_os_profiles"
+TERMINAL_STATE_DIR = DEFAULT_DATA_DIR / "terminal"
+MAX_TABS_PER_SESSION = 10
+DEFAULT_REMOTE_WIDTH_CAP = 1280
+DEFAULT_REMOTE_HEIGHT_CAP = 720
+MAX_REMOTE_FPS = 60
+DEFAULT_XVFB_START_DISPLAY = 110
+DEFAULT_REMOTE_STUN_SERVERS = ["stun:stun.l.google.com:19302"]
 
 
 def utc_now() -> str:
@@ -141,6 +160,8 @@ def ensure_dirs() -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     WRAPPER_DIR.mkdir(parents=True, exist_ok=True)
     WIREGUARD_DIR.mkdir(parents=True, exist_ok=True)
+    SYNCED_BLOB_DIR.mkdir(parents=True, exist_ok=True)
+    TERMINAL_STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def read_json(path: pathlib.Path, default: t.Any) -> t.Any:
@@ -310,6 +331,7 @@ def run_command(
     capture_output: bool = True,
     text: bool = True,
     input_data: str | bytes | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
@@ -317,6 +339,7 @@ def run_command(
         capture_output=capture_output,
         text=text,
         input=input_data,
+        env=env,
     )
 
 
@@ -359,7 +382,7 @@ def migrate_config(raw: dict[str, t.Any]) -> dict[str, t.Any]:
     if not raw:
         return raw
 
-    raw.setdefault("version", 3)
+    raw.setdefault("version", 4)
 
     raw.setdefault("frontend", {})
     raw["frontend"].setdefault("serve_ui", False)
@@ -367,7 +390,6 @@ def migrate_config(raw: dict[str, t.Any]) -> dict[str, t.Any]:
 
     raw.setdefault("ops", {})
 
-    # Migrate legacy installer output where updater settings were stored under ops.updates.
     legacy_updates = raw["ops"].get("updates")
     if isinstance(legacy_updates, dict):
         raw.setdefault("updates", {})
@@ -383,11 +405,44 @@ def migrate_config(raw: dict[str, t.Any]) -> dict[str, t.Any]:
     raw["updates"].setdefault("backend_path", DEFAULT_REMOTE_BACKEND_PATH)
     raw["updates"].setdefault("frontend_path", DEFAULT_REMOTE_FRONTEND_PATH)
 
+    raw.setdefault("server", {})
+    raw["server"].setdefault("host", "127.0.0.1")
+    raw["server"].setdefault("port", 8787)
+    raw["server"].setdefault("public_base_url", "https://node.example.com")
+    raw["server"].setdefault("allowed_origins", [])
+    raw["server"].setdefault("frame_ancestors", [])
+    raw["server"].setdefault("max_clients", 12)
+    raw["server"].setdefault("exposure_mode", "lan")
+
+    raw.setdefault("browser", {})
+    raw["browser"].setdefault("mode", "hybrid")
+    raw["browser"].setdefault("max_sessions", 4)
+    raw["browser"].setdefault("max_tabs_per_session", MAX_TABS_PER_SESSION)
+    raw["browser"].setdefault("viewport", {"width": 1366, "height": 900})
+    raw["browser"].setdefault("user_agent", "")
+    raw["browser"].setdefault("block_aggressive_popups", True)
+    raw["browser"].setdefault("strip_common_junk", True)
+    raw["browser"].setdefault("allow_media_proxy", True)
+    raw["browser"].setdefault("screenshot_quality", 85)
+    raw["browser"].setdefault("screenshot_fps", 30)
+    raw["browser"].setdefault("remote_width_cap", DEFAULT_REMOTE_WIDTH_CAP)
+    raw["browser"].setdefault("remote_height_cap", DEFAULT_REMOTE_HEIGHT_CAP)
+    raw["browser"].setdefault("detection", {})
+    raw["browser"]["detection"].setdefault("heavy_dom_threshold", 5000)
+    raw["browser"]["detection"].setdefault("heavy_script_threshold", 32)
+    raw["browser"]["detection"].setdefault("canvas_threshold", 2)
+
+    raw["ops"].setdefault("use_tmux", True)
+    raw["ops"].setdefault("run_on_boot", True)
+    raw["ops"].setdefault("auto_https", False)
+    raw["ops"].setdefault("certbot_email", "")
+
     return raw
 
 
 def ensure_system_packages() -> None:
     missing: list[str] = []
+
     if which("curl") is None:
         missing.append("curl")
     if which("tmux") is None:
@@ -400,6 +455,16 @@ def ensure_system_packages() -> None:
         missing.append("tor")
     if which("ffmpeg") is None:
         missing.append("ffmpeg")
+    if which("Xvfb") is None:
+        missing.append("xvfb")
+    if which("xrandr") is None:
+        missing.append("x11-xserver-utils")
+    if which("pulseaudio") is None:
+        missing.append("pulseaudio")
+    if which("pactl") is None:
+        missing.append("pulseaudio-utils")
+    if which("dbus-launch") is None:
+        missing.append("dbus-x11")
 
     missing = sorted(set(missing))
     if missing:
@@ -423,6 +488,10 @@ def ensure_python_packages() -> bool:
         missing.append("pyotp")
     if qrcode is None:
         missing.append("qrcode[pil]")
+    if RTCPeerConnection is None:
+        missing.append("aiortc")
+    if av is None:
+        missing.append("av")
 
     missing = sorted(set(missing))
     if not missing:
@@ -543,6 +612,117 @@ def factory_reset_flow(*, reinstall: bool = False) -> int:
 
     print("Node state erased. Run `python vortex_network.py install` to configure it again.")
     return 0
+
+def free_display_number(start: int = DEFAULT_XVFB_START_DISPLAY, stop: int = DEFAULT_XVFB_START_DISPLAY + 60) -> int:
+    for number in range(start, stop):
+        if not pathlib.Path(f"/tmp/.X11-unix/X{number}").exists():
+            return number
+    raise RuntimeError("No free Xvfb display numbers were found.")
+
+
+def ensure_xvfb(display_number: int, width: int, height: int) -> subprocess.Popen:
+    proc = subprocess.Popen(
+        ["Xvfb", f":{display_number}", "-screen", "0", f"{width}x{height}x24", "-ac", "-nolisten", "tcp"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    deadline = time.time() + 5
+    socket_path = pathlib.Path(f"/tmp/.X11-unix/X{display_number}")
+    while time.time() < deadline:
+        if socket_path.exists():
+            return proc
+        time.sleep(0.1)
+
+    with contextlib.suppress(Exception):
+        proc.terminate()
+    raise RuntimeError(f"Xvfb did not start on :{display_number}")
+
+
+def ensure_pulse_server() -> dict[str, str]:
+    runtime_dir = (RUNTIME_DIR / "pulse-runtime").resolve()
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(runtime_dir, 0o700)
+
+    socket_path = runtime_dir / "native"
+
+    env = os.environ.copy()
+    env["XDG_RUNTIME_DIR"] = str(runtime_dir)
+    env["PULSE_SERVER"] = f"unix:{socket_path}"
+
+    if not socket_path.exists():
+        subprocess.run(
+            [
+                "pulseaudio",
+                "--daemonize=yes",
+                "--exit-idle-time=-1",
+                "--disable-shm=yes",
+                "--log-target=stderr",
+                "--load", f"module-native-protocol-unix auth-anonymous=1 socket={socket_path}",
+            ],
+            env=env,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if socket_path.exists():
+                break
+            time.sleep(0.1)
+
+    if not socket_path.exists():
+        raise RuntimeError("PulseAudio did not start correctly.")
+
+    return env
+
+
+def pulse_load_module(pulse_env: dict[str, str], *args: str) -> str:
+    result = run_command(["pactl", "load-module", *args], env=pulse_env, check=True)
+    return (result.stdout or "").strip()
+
+
+def pulse_unload_module(pulse_env: dict[str, str], module_id: str | None) -> None:
+    if not module_id:
+        return
+    with contextlib.suppress(Exception):
+        run_command(["pactl", "unload-module", module_id], env=pulse_env, check=False)
+
+
+def create_session_audio_devices(session_id: str, pulse_env: dict[str, str]) -> dict[str, t.Any]:
+    safe_id = re.sub(r"[^a-zA-Z0-9]", "", session_id)[:12]
+
+    sink_name = f"vortex_{safe_id}_sink"
+    sink_module_id = pulse_load_module(
+        pulse_env,
+        "module-null-sink",
+        f"sink_name={sink_name}",
+        f"sink_properties=device.description=Vortex-{safe_id}",
+    )
+
+    mic_fifo = RUNTIME_DIR / f"{safe_id}.mic.pcm"
+    with contextlib.suppress(FileNotFoundError):
+        mic_fifo.unlink()
+    os.mkfifo(mic_fifo, 0o600)
+
+    mic_source_name = f"vortex_{safe_id}_mic"
+    mic_module_id = pulse_load_module(
+        pulse_env,
+        "module-pipe-source",
+        f"file={mic_fifo}",
+        f"source_name={mic_source_name}",
+        "format=s16le",
+        "rate=48000",
+        "channels=2",
+    )
+
+    return {
+        "sink_name": sink_name,
+        "sink_module_id": sink_module_id,
+        "mic_source_name": mic_source_name,
+        "mic_module_id": mic_module_id,
+        "mic_fifo": mic_fifo,
+    }
 
 def parse_wireguard_config(raw: str) -> dict[str, t.Any]:
     section = ""
@@ -762,6 +942,203 @@ def build_totp_qr_data_url(otpauth_uri: str) -> str | None:
         return None
 
 
+def sanitize_username_for_path(username: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9._-]+", "_", str(username or "").strip())
+    return clean or "owner"
+
+def synced_blob_path(username: str) -> pathlib.Path:
+    return SYNCED_BLOB_DIR / f"{sanitize_username_for_path(username)}.json"
+
+def strip_ansi_codes(text: str) -> str:
+    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text or "")
+
+def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
+    if sys.platform != "linux":
+        raise RuntimeError("Automatic Nginx/Certbot setup is only implemented for Linux.")
+    if os.geteuid() != 0:
+        raise RuntimeError("Run the installer with sudo/root to configure Nginx and HTTPS automatically.")
+
+    apt_install(["nginx", "certbot", "python3-certbot-nginx"])
+
+    public_base = str(cfg.server.get("public_base_url", "")).strip()
+    parsed = urllib.parse.urlparse(public_base)
+    domain = parsed.hostname or ""
+    if not domain or domain in {"localhost", "127.0.0.1"}:
+        raise RuntimeError("A real public domain is required for automatic HTTPS setup.")
+
+    upstream = f"http://{cfg.server.get('host', '127.0.0.1')}:{int(cfg.server.get('port', 8787))}"
+    site_path = pathlib.Path("/etc/nginx/sites-available/vortex-node")
+    enabled_path = pathlib.Path("/etc/nginx/sites-enabled/vortex-node")
+
+    nginx_conf = textwrap.dedent(f"""
+    map $http_upgrade $connection_upgrade {{
+        default upgrade;
+        ''      close;
+    }}
+
+    server {{
+        listen 80;
+        server_name {domain};
+
+        client_max_body_size 64m;
+
+        location / {{
+            proxy_pass {upstream};
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+        }}
+    }}
+    """).strip() + "\n"
+
+    site_path.write_text(nginx_conf, "utf-8")
+    if enabled_path.exists() or enabled_path.is_symlink():
+        enabled_path.unlink()
+    enabled_path.symlink_to(site_path)
+
+    default_site = pathlib.Path("/etc/nginx/sites-enabled/default")
+    if default_site.exists() or default_site.is_symlink():
+        with contextlib.suppress(Exception):
+            default_site.unlink()
+
+    run_command(["nginx", "-t"], check=True)
+    run_command(["systemctl", "enable", "--now", "nginx"], check=False)
+    run_command(["systemctl", "reload", "nginx"], check=False)
+
+    email = str(certbot_email or "").strip()
+    if not email:
+        email = f"admin@{domain}"
+
+    run_command([
+        "certbot",
+        "--nginx",
+        "--non-interactive",
+        "--agree-tos",
+        "--redirect",
+        "-m", email,
+        "-d", domain,
+    ], check=False)
+
+@dataclasses.dataclass
+class TerminalSessionState:
+    session_id: str
+    username: str
+    cwd: str
+    created_at: str
+    updated_at: str
+
+class TerminalRuntime:
+    def __init__(self) -> None:
+        self.sessions: dict[str, TerminalSessionState] = {}
+        self._lock = asyncio.Lock()
+
+    async def create_session(self, username: str) -> TerminalSessionState:
+        session = TerminalSessionState(
+            session_id=secrets.token_urlsafe(12),
+            username=str(username or "owner"),
+            cwd=str(pathlib.Path.home()),
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        async with self._lock:
+            self.sessions[session.session_id] = session
+        return session
+
+    def get(self, session_id: str) -> TerminalSessionState:
+        session = self.sessions.get(session_id)
+        if not session:
+            raise HTTPException(404, "Unknown terminal session")
+        return session
+
+    async def close_session(self, session_id: str) -> None:
+        async with self._lock:
+            self.sessions.pop(session_id, None)
+
+    async def exec(self, session_id: str, command: str) -> dict[str, t.Any]:
+        session = self.get(session_id)
+        command = str(command or "").rstrip()
+        if not command:
+            return {
+                "ok": True,
+                "cwd": session.cwd,
+                "output": "",
+                "exit_code": 0,
+                "session_id": session.session_id,
+            }
+
+        script = (
+            f"cd {shlex_quote(session.cwd)}\n"
+            f"{command}\n"
+            "printf '\\n__VORTEX_CWD__=%s\\n' \"$PWD\"\n"
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            "/bin/bash",
+            "-lc",
+            script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=os.environ.copy(),
+        )
+        stdout, stderr = await proc.communicate()
+
+        combined = (stdout or b"").decode("utf-8", "replace") + (stderr or b"").decode("utf-8", "replace")
+        combined = strip_ansi_codes(combined)
+
+        marker = "__VORTEX_CWD__="
+        new_cwd = session.cwd
+        idx = combined.rfind(marker)
+        if idx != -1:
+            tail = combined[idx + len(marker):].strip()
+            tail_line = tail.splitlines()[0].strip() if tail else ""
+            if tail_line:
+                new_cwd = tail_line
+            combined = combined[:idx].rstrip() + ("\n" if combined[:idx].strip() else "")
+
+        session.cwd = new_cwd
+        session.updated_at = utc_now()
+
+        return {
+            "ok": proc.returncode == 0,
+            "cwd": session.cwd,
+            "output": combined,
+            "exit_code": int(proc.returncode or 0),
+            "session_id": session.session_id,
+        }
+
+class FrameSocketHub:
+    def __init__(self) -> None:
+        self._sockets: dict[str, set[WebSocket]] = defaultdict(set)
+        self._lock = asyncio.Lock()
+
+    async def connect(self, session_id: str, websocket: WebSocket) -> None:
+        await websocket.accept()
+        async with self._lock:
+            self._sockets[session_id].add(websocket)
+
+    async def disconnect(self, session_id: str, websocket: WebSocket) -> None:
+        async with self._lock:
+            self._sockets[session_id].discard(websocket)
+            if not self._sockets[session_id]:
+                self._sockets.pop(session_id, None)
+
+    async def broadcast(self, session_id: str, payload: bytes) -> None:
+        async with self._lock:
+            sockets = list(self._sockets.get(session_id, set()))
+        dead: list[WebSocket] = []
+        for ws in sockets:
+            try:
+                await ws.send_bytes(payload)
+            except Exception:
+                dead.append(ws)
+        if dead:
+            async with self._lock:
+                for ws in dead:
+                    self._sockets[session_id].discard(ws)
+
 def paired_devices(cfg_raw: dict[str, t.Any]) -> list[dict[str, t.Any]]:
     auth_cfg = cfg_raw.setdefault("auth", {})
     return auth_cfg.setdefault("paired_devices", [])
@@ -799,8 +1176,17 @@ def revoke_paired_device(cfg_raw: dict[str, t.Any], device_id: str) -> bool:
 def ask_install_config() -> dict[str, t.Any]:
     ensure_dirs()
     print(f"\n== {APP_NAME} installer ==\n")
-    print("This installer configures the node, optional frontend serving, routing mode, tmux/systemd helpers, and security settings.")
-    print("Run it with sudo on Ubuntu 24 if you want automatic WireGuard/Tor/systemd setup.\n")
+    print("This installer configures the node, frontend serving, routing mode, browser behavior, updates, and optional HTTPS automation.")
+    print("Run it with sudo on Ubuntu if you want automatic WireGuard/Tor/systemd/Nginx/Certbot setup.\n")
+
+    deployment_mode = prompt_choice(
+        "How should this node be reached?",
+        [
+            ("lan", "LAN only / local network"),
+            ("public", "Public domain over HTTPS"),
+        ],
+        default_key="lan",
+    )
 
     bind_mode = prompt_choice(
         "Where should the Python server bind?",
@@ -808,13 +1194,18 @@ def ask_install_config() -> dict[str, t.Any]:
             ("localhost", "127.0.0.1 only (recommended behind Nginx/Certbot)"),
             ("lan", "0.0.0.0 for LAN / direct access"),
         ],
-        default_key="localhost",
+        default_key="localhost" if deployment_mode == "public" else "lan",
     )
+    if deployment_mode == "public":
+        bind_mode = "localhost"
+
     host = "127.0.0.1" if bind_mode == "localhost" else "0.0.0.0"
     port = int(prompt("Node port", default="8787"))
+
+    public_base_default = "https://node.example.com" if deployment_mode == "public" else f"http://{local_ip_guess()}:{port}"
     public_base_url = prompt(
-        "Public base URL (example: https://example.com)",
-        default="https://example.com",
+        "Public base URL (example: https://node.example.com or http://192.168.1.20:8787)",
+        default=public_base_default,
     ).rstrip("/")
 
     serve_ui = prompt_yes_no("Serve the Vortex OS HTML file from this node root (/)?", default=True)
@@ -824,6 +1215,14 @@ def ask_install_config() -> dict[str, t.Any]:
             "Path to the Vortex OS HTML file to serve",
             default=str(DEFAULT_UI_HTML.resolve()),
         )
+
+    auto_https = False
+    certbot_email = ""
+    if deployment_mode == "public":
+        auto_https = prompt_yes_no("Automatically configure Nginx and HTTPS with Certbot?", default=True)
+        if auto_https:
+            suggested_email = f"admin@{urllib.parse.urlparse(public_base_url).hostname or 'example.com'}"
+            certbot_email = prompt("Email for Certbot / Let's Encrypt", default=suggested_email)
 
     print("\nCreate the first node owner account.")
     while True:
@@ -872,44 +1271,27 @@ def ask_install_config() -> dict[str, t.Any]:
 
     if route_mode == "wireguard":
         wireguard_cfg["enabled"] = True
-        wireguard_cfg["config_path"] = prompt(
-            "Path to WireGuard .conf file",
-            default="/etc/wireguard/wg0.conf",
-        )
-        wireguard_cfg["interface_name"] = prompt(
-            "Worker WireGuard interface name",
-            default=DEFAULT_WG_INTERFACE,
-        )
-        wireguard_cfg["namespace_name"] = prompt(
-            "Worker network namespace name",
-            default=DEFAULT_WG_NAMESPACE,
-        )
-        wireguard_cfg["auto_configure"] = prompt_yes_no(
-            "Configure the worker namespace + WireGuard automatically now?",
-            default=True,
-        )
+        wireguard_cfg["config_path"] = prompt("Path to WireGuard .conf file", default="/etc/wireguard/wg0.conf")
+        wireguard_cfg["interface_name"] = prompt("Worker WireGuard interface name", default=DEFAULT_WG_INTERFACE)
+        wireguard_cfg["namespace_name"] = prompt("Worker network namespace name", default=DEFAULT_WG_NAMESPACE)
+        wireguard_cfg["auto_configure"] = prompt_yes_no("Configure the worker namespace + WireGuard automatically now?", default=True)
     elif route_mode == "tor":
         tor_cfg["enabled"] = True
-        tor_cfg["socks_url"] = prompt(
-            "Tor SOCKS URL",
-            default=DEFAULT_TOR_SOCKS,
-        )
-        tor_cfg["install_if_missing"] = prompt_yes_no(
-            "Install/start Tor automatically if needed?",
-            default=True,
-        )
+        tor_cfg["socks_url"] = prompt("Tor SOCKS URL", default=DEFAULT_TOR_SOCKS)
+        tor_cfg["install_if_missing"] = prompt_yes_no("Install/start Tor automatically if needed?", default=True)
 
     browser_mode = prompt_choice(
         "Default browser virtualization mode",
         [
-            ("hybrid", "Hybrid: translated render first, stream when needed"),
-            ("translate", "Translated/local render first"),
-            ("stream", "Always prefer streamed browser view"),
+            ("hybrid", "Translation first, automatic live remote fallback"),
+            ("translate", "Always prefer translated/local render"),
+            ("stream", "Always prefer live remote mode"),
         ],
         default_key="hybrid",
     )
 
-    max_sessions = int(prompt("Maximum simultaneous browser sessions", default="4"))
+    max_sessions = int(prompt("Maximum simultaneous browser windows", default="4"))
+    max_tabs_per_session = int(prompt("Maximum tabs per browser window", default=str(MAX_TABS_PER_SESSION)))
     max_clients = int(prompt("Maximum simultaneous API/browser clients", default="12"))
 
     frame_ancestors = parse_origin_list(prompt(
@@ -929,9 +1311,9 @@ def ask_install_config() -> dict[str, t.Any]:
         "backend_path": DEFAULT_REMOTE_BACKEND_PATH,
         "frontend_path": DEFAULT_REMOTE_FRONTEND_PATH,
     }
-  
+
     cfg = {
-        "version": 2,
+        "version": 4,
         "created_at": utc_now(),
         "updated_at": utc_now(),
         "server": {
@@ -941,6 +1323,7 @@ def ask_install_config() -> dict[str, t.Any]:
             "allowed_origins": cors_origins,
             "frame_ancestors": frame_ancestors,
             "max_clients": max_clients,
+            "exposure_mode": deployment_mode,
         },
         "frontend": {
             "serve_ui": serve_ui,
@@ -972,13 +1355,16 @@ def ask_install_config() -> dict[str, t.Any]:
             "mode": browser_mode,
             "default_route_mode": route_mode,
             "max_sessions": max_sessions,
+            "max_tabs_per_session": max_tabs_per_session,
             "viewport": {"width": 1366, "height": 900},
             "user_agent": "",
             "block_aggressive_popups": True,
             "strip_common_junk": True,
             "allow_media_proxy": True,
             "screenshot_quality": 85,
-            "screenshot_fps": 4,
+            "screenshot_fps": 30,
+            "remote_width_cap": DEFAULT_REMOTE_WIDTH_CAP,
+            "remote_height_cap": DEFAULT_REMOTE_HEIGHT_CAP,
             "detection": {
                 "heavy_dom_threshold": 5000,
                 "heavy_script_threshold": 32,
@@ -995,11 +1381,15 @@ def ask_install_config() -> dict[str, t.Any]:
             "pair_tokens": True,
             "totp": True,
             "frontend_serving": True,
+            "terminal": True,
+            "node_blob_sync": True,
         },
         "updates": updates_cfg,
         "ops": {
             "use_tmux": use_tmux,
             "run_on_boot": run_on_boot,
+            "auto_https": auto_https,
+            "certbot_email": certbot_email,
         },
     }
 
@@ -1312,6 +1702,8 @@ async def analyze_page_profile(page: Page, cfg: NodeConfig) -> dict[str, t.Any]:
             const nodes = document.getElementsByTagName('*').length;
             const hasMediaSource = typeof window.MediaSource !== 'undefined';
             const hasWebRTC = !!(window.RTCPeerConnection || window.webkitRTCPeerConnection || window.mozRTCPeerConnection);
+            const hasGetUserMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+            const webglContexts = Array.from(document.querySelectorAll('canvas')).length;
 
             return {
                 videos,
@@ -1324,6 +1716,8 @@ async def analyze_page_profile(page: Page, cfg: NodeConfig) -> dict[str, t.Any]:
                 service_worker_count: serviceWorkerCount,
                 has_media_source: hasMediaSource,
                 has_webrtc: hasWebRTC,
+                has_getusermedia: hasGetUserMedia,
+                webgl_contexts: webglContexts,
             };
         }"""
     )
@@ -1338,28 +1732,49 @@ async def analyze_page_profile(page: Page, cfg: NodeConfig) -> dict[str, t.Any]:
         "open.spotify.com",
         "www.netflix.com", "netflix.com",
         "www.twitch.tv", "twitch.tv",
+        "meet.google.com",
+        "web.whatsapp.com",
     }
 
     recommended_mode = "translate"
+    remote_reason = ""
+
     if any(host == h or host.endswith(f".{h}") for h in stream_hosts):
         recommended_mode = "stream"
+        remote_reason = "known-media-host"
     elif metrics["videos"] > 0 or metrics["audios"] > 0 or metrics["has_media_source"]:
         recommended_mode = "stream"
-    elif metrics["cross_origin_iframes"] > 0 or metrics["service_worker_count"] > 0 or metrics["has_webrtc"]:
+        remote_reason = "media-runtime"
+    elif metrics["has_webrtc"] or metrics["has_getusermedia"]:
+        recommended_mode = "stream"
+        remote_reason = "realtime-media"
+    elif metrics["cross_origin_iframes"] > 0 or metrics["service_worker_count"] > 0:
         recommended_mode = "hybrid"
+        remote_reason = "complex-app-shell"
     elif metrics["nodes"] >= heavy_dom_threshold or metrics["scripts"] >= heavy_script_threshold or metrics["canvases"] >= canvas_threshold:
         recommended_mode = "hybrid"
+        remote_reason = "heavy-dom"
 
     metrics["host"] = host
     metrics["url"] = url
     metrics["recommended_mode"] = recommended_mode
+    metrics["remote_reason"] = remote_reason
     return metrics
+
+@dataclasses.dataclass
+class BrowserTab:
+    tab_id: str
+    page: Page
+    title: str = "New Tab"
+    url: str = "about:blank"
+
 
 class BrowserRuntime:
     def __init__(self, cfg: NodeConfig) -> None:
         self.cfg = cfg
         self.playwright: Playwright | None = None
         self.hub = SessionWebSocketHub()
+        self.frame_hub = FrameSocketHub()
         self.sessions: dict[str, "BrowserSession"] = {}
         self._lock = asyncio.Lock()
 
@@ -1389,7 +1804,7 @@ class BrowserRuntime:
         async with self._lock:
             max_sessions = int(self.cfg.browser.get("max_sessions", 4))
             if len(self.sessions) >= max_sessions:
-                raise HTTPException(429, f"Maximum browser sessions reached ({max_sessions})")
+                raise HTTPException(429, f"Maximum browser windows reached ({max_sessions})")
             session_id = secrets.token_urlsafe(12)
             session = BrowserSession(
                 runtime=self,
@@ -1436,7 +1851,11 @@ class BrowserSession:
 
         self.browser: Browser | None = None
         self.context: BrowserContext | None = None
-        self.page: Page | None = None
+
+        self.tabs: dict[str, Page] = {}
+        self.tab_order: list[str] = []
+        self.tab_meta: dict[str, dict[str, str]] = {}
+        self.active_tab_id: str = ""
 
         self.created_at = utc_now()
         self.updated_at = utc_now()
@@ -1447,11 +1866,111 @@ class BrowserSession:
         self.viewer_token = secrets.token_urlsafe(24)
         self.closed = False
         self.analysis: dict[str, t.Any] = {}
+        self.translation_event_counts: dict[str, int] = defaultdict(int)
+        self.force_stream_reason = ""
 
         self._html_lock = asyncio.Lock()
-        self._frame_task: asyncio.Task[None] | None = None
         self._frame_bytes: bytes | None = None
         self._frame_event = asyncio.Event()
+        self._stream_cdp: t.Any = None
+        self._stream_active_tab_id = ""
+
+    @property
+    def active_page(self) -> Page:
+        page = self.tabs.get(self.active_tab_id)
+        if page is None:
+            raise HTTPException(404, "No active tab")
+        return page
+
+    def tabs_payload(self) -> list[dict[str, t.Any]]:
+        payload: list[dict[str, t.Any]] = []
+        for tab_id in self.tab_order:
+            meta = self.tab_meta.get(tab_id, {})
+            payload.append({
+                "tab_id": tab_id,
+                "title": meta.get("title") or "New Tab",
+                "url": meta.get("url") or "about:blank",
+                "active": tab_id == self.active_tab_id,
+            })
+        return payload
+
+    async def _refresh_tab_meta(self, tab_id: str) -> None:
+        page = self.tabs.get(tab_id)
+        if page is None:
+            return
+        try:
+            title = await page.title()
+        except Exception:
+            title = self.tab_meta.get(tab_id, {}).get("title", "New Tab")
+        try:
+            url = page.url or "about:blank"
+        except Exception:
+            url = self.tab_meta.get(tab_id, {}).get("url", "about:blank")
+        self.tab_meta[tab_id] = {
+            "title": title or "New Tab",
+            "url": url or "about:blank",
+        }
+
+    async def _wire_page_events(self, page: Page, tab_id: str) -> None:
+        async def on_console(msg):
+            text = msg.text[:400]
+            if getattr(msg, "type", "") == "error":
+                self.translation_event_counts["console_error"] += 1
+                if self.translation_event_counts["console_error"] >= 3:
+                    self.force_stream_reason = "console-error-threshold"
+                    if tab_id == self.active_tab_id:
+                        await self.refresh_render(reason="console-error")
+            await self.runtime.hub.broadcast(self.session_id, {
+                "type": "console",
+                "tab_id": tab_id,
+                "text": text,
+            })
+
+        async def on_load():
+            await self._refresh_tab_meta(tab_id)
+            if tab_id == self.active_tab_id:
+                await self.refresh_render(reason="load")
+
+        async def on_domcontentloaded():
+            await self._refresh_tab_meta(tab_id)
+            if tab_id == self.active_tab_id:
+                await self.refresh_render(reason="domcontentloaded")
+
+        async def on_popup(popup_page):
+            if len(self.tabs) >= int(self.cfg.browser.get("max_tabs_per_session", MAX_TABS_PER_SESSION)):
+                with contextlib.suppress(Exception):
+                    await popup_page.close()
+                return
+            await self._create_tab_page(page=popup_page, url=popup_page.url or "about:blank", make_active=True)
+            await self.refresh_render(reason="popup")
+
+        page.on("console", lambda msg: asyncio.create_task(on_console(msg)))
+        page.on("load", lambda: asyncio.create_task(on_load()))
+        page.on("domcontentloaded", lambda: asyncio.create_task(on_domcontentloaded()))
+        page.on("popup", lambda popup: asyncio.create_task(on_popup(popup)))
+
+    async def _create_tab_page(self, *, url: str = "about:blank", make_active: bool = True, page: Page | None = None) -> str:
+        if len(self.tabs) >= int(self.cfg.browser.get("max_tabs_per_session", MAX_TABS_PER_SESSION)):
+            raise HTTPException(429, f"Maximum tabs reached ({int(self.cfg.browser.get('max_tabs_per_session', MAX_TABS_PER_SESSION))})")
+
+        assert self.context is not None
+        page = page or await self.context.new_page()
+        tab_id = secrets.token_urlsafe(8)
+        self.tabs[tab_id] = page
+        self.tab_order.append(tab_id)
+        self.tab_meta[tab_id] = {"title": "New Tab", "url": "about:blank"}
+        await self._wire_page_events(page, tab_id)
+
+        if make_active:
+            self.active_tab_id = tab_id
+
+        if url and url != "about:blank":
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            with contextlib.suppress(Exception):
+                await page.wait_for_load_state("load", timeout=15000)
+
+        await self._refresh_tab_meta(tab_id)
+        return tab_id
 
     async def start(self) -> None:
         assert self.runtime.playwright is not None
@@ -1478,64 +1997,116 @@ class BrowserSession:
             java_script_enabled=True,
             bypass_csp=False,
             accept_downloads=False,
+            user_agent=str(self.cfg.browser.get("user_agent") or "") or None,
         )
-        self.page = await self.context.new_page()
-        await self._wire_page_events()
 
+        await self._create_tab_page(url=self.target_url, make_active=True)
         self.last_status = "starting"
-        await self.page.goto(self.target_url, wait_until="domcontentloaded", timeout=60000)
-        with contextlib.suppress(Exception):
-            await self.page.wait_for_load_state("load", timeout=15000)
-
-        self.analysis = await analyze_page_profile(self.page, self.cfg)
-        if self.requested_mode == "hybrid":
-            self.effective_mode = self.analysis.get("recommended_mode", "translate")
-        else:
-            self.effective_mode = self.requested_mode
-
-        if self.effective_mode in {"stream", "hybrid"} and self._frame_task is None:
-            self._frame_task = asyncio.create_task(self._frame_loop())
-
         await self.refresh_render(reason="initial")
 
-    async def _wire_page_events(self) -> None:
-        assert self.page is not None
+    async def create_tab(self, url: str = "about:blank") -> str:
+        tab_id = await self._create_tab_page(url=url, make_active=True)
+        await self.refresh_render(reason="new_tab")
+        return tab_id
 
-        async def on_console(msg):
-            text = msg.text
-            await self.runtime.hub.broadcast(self.session_id, {"type": "console", "text": text[:400]})
+    async def activate_tab(self, tab_id: str) -> None:
+        if tab_id not in self.tabs:
+            raise HTTPException(404, "Unknown tab")
+        self.active_tab_id = tab_id
+        await self.refresh_render(reason="activate_tab")
 
-        async def on_load():
-            await self.refresh_render(reason="load")
+    async def close_tab(self, tab_id: str) -> None:
+        page = self.tabs.get(tab_id)
+        if page is None:
+            raise HTTPException(404, "Unknown tab")
 
-        async def on_domcontentloaded():
-            await self.refresh_render(reason="domcontentloaded")
+        if len(self.tabs) == 1:
+            await page.goto("about:blank", wait_until="domcontentloaded", timeout=60000)
+            self.force_stream_reason = ""
+            await self._refresh_tab_meta(tab_id)
+            await self.refresh_render(reason="close_last_tab")
+            return
 
-        async def on_popup(page):
+        with contextlib.suppress(Exception):
+            await page.close()
+
+        self.tabs.pop(tab_id, None)
+        self.tab_meta.pop(tab_id, None)
+        self.tab_order = [x for x in self.tab_order if x != tab_id]
+
+        if self.active_tab_id == tab_id:
+            self.active_tab_id = self.tab_order[-1]
+
+        await self.refresh_render(reason="close_tab")
+
+    async def note_translation_event(self, event_type: str, detail: dict[str, t.Any] | None = None) -> None:
+        event_type = str(event_type or "").strip().lower()
+        if not event_type:
+            return
+
+        self.translation_event_counts[event_type] += 1
+        if event_type in {"media_capture_requested", "camera_capture_requested", "microphone_capture_requested"}:
+            self.force_stream_reason = event_type
+        elif event_type in {"client_error", "promise_rejection"} and self.translation_event_counts[event_type] >= 4:
+            self.force_stream_reason = "translation-error-threshold"
+        elif event_type == "media_runtime":
+            self.force_stream_reason = "media-runtime"
+
+        await self.runtime.hub.broadcast(self.session_id, {
+            "type": "translation_event",
+            "event_type": event_type,
+            "detail": detail or {},
+        })
+
+        if self.active_tab_id:
+            await self.refresh_render(reason=f"translation-event:{event_type}")
+
+    async def _stop_screencast(self) -> None:
+        if self._stream_cdp is not None:
             with contextlib.suppress(Exception):
-                await page.close()
-            await self.runtime.hub.broadcast(self.session_id, {"type": "popup_blocked"})
+                await self._stream_cdp.send("Page.stopScreencast")
+        self._stream_cdp = None
+        self._stream_active_tab_id = ""
 
-        self.page.on("console", lambda msg: asyncio.create_task(on_console(msg)))
-        self.page.on("load", lambda: asyncio.create_task(on_load()))
-        self.page.on("domcontentloaded", lambda: asyncio.create_task(on_domcontentloaded()))
-        self.page.on("popup", lambda popup: asyncio.create_task(on_popup(popup)))
+    async def _on_screencast_frame(self, payload: dict[str, t.Any]) -> None:
+        data_b64 = str(payload.get("data") or "")
+        if not data_b64:
+            return
+        try:
+            self._frame_bytes = base64.b64decode(data_b64)
+            self._frame_event.set()
+            await self.runtime.frame_hub.broadcast(self.session_id, self._frame_bytes)
+        finally:
+            if self._stream_cdp is not None:
+                with contextlib.suppress(Exception):
+                    await self._stream_cdp.send("Page.screencastFrameAck", {"sessionId": payload.get("sessionId")})
 
-    async def _frame_loop(self) -> None:
-        fps = int(self.cfg.browser.get("screenshot_fps", 4))
-        fps = max(1, min(10, fps))
-        delay = 1.0 / fps
+    async def _ensure_screencast(self) -> None:
+        if self._stream_cdp is not None and self._stream_active_tab_id == self.active_tab_id:
+            return
 
-        while not self.closed and self.page is not None:
-            try:
-                self._frame_bytes = await self.page.screenshot(
-                    type="jpeg",
-                    quality=int(self.cfg.browser.get("screenshot_quality", 85)),
-                )
-                self._frame_event.set()
-            except Exception:
-                pass
-            await asyncio.sleep(delay)
+        await self._stop_screencast()
+
+        page = self.active_page
+        assert self.context is not None
+        cdp = await self.context.new_cdp_session(page)
+        self._stream_cdp = cdp
+        self._stream_active_tab_id = self.active_tab_id
+
+        cdp.on("Page.screencastFrame", lambda payload: asyncio.create_task(self._on_screencast_frame(payload)))
+        await cdp.send("Page.enable")
+
+        viewport = page.viewport_size or self.cfg.browser.get("viewport", {"width": 1366, "height": 900})
+        max_width = min(int(viewport.get("width", 1366)), int(self.cfg.browser.get("remote_width_cap", DEFAULT_REMOTE_WIDTH_CAP)))
+        max_height = min(int(viewport.get("height", 900)), int(self.cfg.browser.get("remote_height_cap", DEFAULT_REMOTE_HEIGHT_CAP)))
+
+        await cdp.send("Page.startScreencast", {
+            "format": "jpeg",
+            "quality": int(self.cfg.browser.get("screenshot_quality", 85)),
+            "maxWidth": max_width,
+            "maxHeight": max_height,
+            "everyNthFrame": 1,
+        })
 
     async def latest_frame(self) -> bytes:
         if self._frame_bytes is not None:
@@ -1544,37 +2115,42 @@ class BrowserSession:
         return self._frame_bytes or b""
 
     async def refresh_render(self, *, reason: str) -> None:
-        if self.page is None:
-            return
-
         async with self._html_lock:
+            page = self.active_page
+
+            await self._refresh_tab_meta(self.active_tab_id)
+
             try:
-                self.last_title = await self.page.title()
+                self.last_title = (self.tab_meta.get(self.active_tab_id) or {}).get("title") or await page.title()
             except Exception:
                 self.last_title = self.last_title or "Untitled"
 
             try:
-                self.last_url = self.page.url
+                self.last_url = (self.tab_meta.get(self.active_tab_id) or {}).get("url") or page.url
             except Exception:
                 pass
 
             try:
-                self.analysis = await analyze_page_profile(self.page, self.cfg)
+                self.analysis = await analyze_page_profile(page, self.cfg)
             except Exception:
                 pass
 
-            if self.requested_mode == "hybrid":
+            if self.force_stream_reason:
+                new_effective = "stream"
+            elif self.requested_mode == "hybrid":
                 new_effective = self.analysis.get("recommended_mode", self.effective_mode or "translate")
             else:
                 new_effective = self.requested_mode
 
-            if new_effective != self.effective_mode:
-                self.effective_mode = new_effective
-                if self.effective_mode in {"stream", "hybrid"} and self._frame_task is None:
-                    self._frame_task = asyncio.create_task(self._frame_loop())
+            self.effective_mode = new_effective
+
+            if self.effective_mode == "stream":
+                await self._ensure_screencast()
+            else:
+                await self._stop_screencast()
 
             try:
-                raw_html = await self.page.content()
+                raw_html = await page.content()
             except Exception:
                 raw_html = "<!doctype html><html><body><pre>Unable to capture page HTML.</pre></body></html>"
 
@@ -1592,76 +2168,104 @@ class BrowserSession:
                 "status": self.last_status,
                 "render_mode": self.effective_mode,
                 "route_mode": self.route_mode,
+                "tabs": self.tabs_payload(),
+                "active_tab_id": self.active_tab_id,
+                "stream_reason": self.force_stream_reason,
             },
         )
 
     async def navigate(self, url: str) -> None:
-        if self.page is None:
-            raise HTTPException(400, "session not ready")
-        await self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        with contextlib.suppress(Exception):
-            await self.page.wait_for_load_state("load", timeout=15000)
+        page = self.active_page
+        if url == "about:blank":
+            await page.goto("about:blank", wait_until="domcontentloaded", timeout=60000)
+        else:
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            with contextlib.suppress(Exception):
+                await page.wait_for_load_state("load", timeout=15000)
+        self.force_stream_reason = ""
         await self.refresh_render(reason="navigate")
 
     async def reload(self) -> None:
-        if self.page is None:
-            raise HTTPException(400, "session not ready")
-        await self.page.reload(wait_until="domcontentloaded", timeout=60000)
+        page = self.active_page
+        await page.reload(wait_until="domcontentloaded", timeout=60000)
         with contextlib.suppress(Exception):
-            await self.page.wait_for_load_state("load", timeout=15000)
+            await page.wait_for_load_state("load", timeout=15000)
         await self.refresh_render(reason="reload")
 
     async def go_back(self) -> None:
-        if self.page is None:
-            raise HTTPException(400, "session not ready")
-        await self.page.go_back(wait_until="domcontentloaded", timeout=60000)
+        page = self.active_page
+        await page.go_back(wait_until="domcontentloaded", timeout=60000)
         with contextlib.suppress(Exception):
-            await self.page.wait_for_load_state("load", timeout=15000)
+            await page.wait_for_load_state("load", timeout=15000)
         await self.refresh_render(reason="back")
 
     async def go_forward(self) -> None:
-        if self.page is None:
-            raise HTTPException(400, "session not ready")
-        await self.page.go_forward(wait_until="domcontentloaded", timeout=60000)
+        page = self.active_page
+        await page.go_forward(wait_until="domcontentloaded", timeout=60000)
         with contextlib.suppress(Exception):
-            await self.page.wait_for_load_state("load", timeout=15000)
+            await page.wait_for_load_state("load", timeout=15000)
         await self.refresh_render(reason="forward")
 
     async def resize(self, width: int, height: int) -> None:
-        if self.page is None:
-            raise HTTPException(400, "session not ready")
+        page = self.active_page
         width = max(320, min(3840, int(width)))
         height = max(240, min(2160, int(height)))
-        await self.page.set_viewport_size({"width": width, "height": height})
-        await asyncio.sleep(0.05)
+        await page.set_viewport_size({"width": width, "height": height})
+        await asyncio.sleep(0.02)
+        if self.effective_mode == "stream":
+            await self._ensure_screencast()
         await self.refresh_render(reason="resize")
 
     async def click(self, x: float, y: float, *, button: str = "left") -> None:
-        if self.page is None:
-            raise HTTPException(400, "session not ready")
-        await self.page.mouse.click(x, y, button=button)
-        await asyncio.sleep(0.15)
+        page = self.active_page
+        await page.mouse.click(x, y, button=button)
+        await asyncio.sleep(0.05)
         await self.refresh_render(reason="click")
 
+    async def mouse_move(self, x: float, y: float) -> None:
+        page = self.active_page
+        await page.mouse.move(x, y)
+
+    async def mouse_down(self, x: float, y: float, *, button: str = "left") -> None:
+        page = self.active_page
+        await page.mouse.move(x, y)
+        await page.mouse.down(button=button)
+
+    async def mouse_up(self, x: float, y: float, *, button: str = "left") -> None:
+        page = self.active_page
+        await page.mouse.move(x, y)
+        await page.mouse.up(button=button)
+        await asyncio.sleep(0.02)
+        await self.refresh_render(reason="mouse_up")
+
+    async def wheel(self, delta_x: float, delta_y: float) -> None:
+        page = self.active_page
+        await page.mouse.wheel(delta_x, delta_y)
+
     async def type_text(self, text: str) -> None:
-        if self.page is None:
-            raise HTTPException(400, "session not ready")
-        await self.page.keyboard.type(text)
-        await asyncio.sleep(0.05)
+        page = self.active_page
+        await page.keyboard.type(text)
+        await asyncio.sleep(0.02)
         await self.refresh_render(reason="type")
 
     async def key_press(self, key: str) -> None:
-        if self.page is None:
-            raise HTTPException(400, "session not ready")
-        await self.page.keyboard.press(key)
-        await asyncio.sleep(0.1)
+        page = self.active_page
+        await page.keyboard.press(key)
+        await asyncio.sleep(0.02)
         await self.refresh_render(reason="key")
 
+    async def key_down(self, key: str) -> None:
+        page = self.active_page
+        await page.keyboard.down(key)
+
+    async def key_up(self, key: str) -> None:
+        page = self.active_page
+        await page.keyboard.up(key)
+
     async def fill_selector(self, selector: str, value: str) -> None:
-        if self.page is None:
-            raise HTTPException(400, "session not ready")
-        await self.page.fill(selector, value)
-        await asyncio.sleep(0.1)
+        page = self.active_page
+        await page.fill(selector, value)
+        await asyncio.sleep(0.02)
         await self.refresh_render(reason="fill")
 
     async def proxy_fetch(self, url: str, method: str, headers: dict[str, str], body: bytes | None) -> SimpleUpstreamResponse:
@@ -1676,15 +2280,14 @@ class BrowserSession:
 
     async def close(self) -> None:
         self.closed = True
-        if self._frame_task:
-            self._frame_task.cancel()
-            with contextlib.suppress(Exception):
-                await self._frame_task
+        await self._stop_screencast()
 
-        if self.page is not None:
+        for page in list(self.tabs.values()):
             with contextlib.suppress(Exception):
-                await self.page.close()
-            self.page = None
+                await page.close()
+        self.tabs.clear()
+        self.tab_meta.clear()
+        self.tab_order.clear()
 
         if self.context is not None:
             with contextlib.suppress(Exception):
@@ -1710,6 +2313,17 @@ VORTEX_BRIDGE_JS = r"""
     try { return new URL(url, originBase).toString(); } catch { return url; }
   }
 
+  async function report(type, detail = {}) {
+    try {
+      await fetch(`${proxyBase}/event?viewer=${encodeURIComponent(viewerToken)}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        keepalive: true,
+        body: JSON.stringify({ type, detail })
+      });
+    } catch {}
+  }
+
   function proxyAsset(url) {
     const u = encodeURIComponent(abs(url));
     return `${proxyBase}/asset?viewer=${encodeURIComponent(viewerToken)}&u=${u}`;
@@ -1718,6 +2332,29 @@ VORTEX_BRIDGE_JS = r"""
   function nav(url) {
     window.location.href = `${proxyBase}/render?viewer=${encodeURIComponent(viewerToken)}&u=${encodeURIComponent(abs(url))}`;
   }
+
+  window.addEventListener('error', (ev) => {
+    report('client_error', { message: String(ev.message || 'error') });
+  });
+
+  window.addEventListener('unhandledrejection', (ev) => {
+    report('promise_rejection', { message: String(ev.reason || 'rejection') });
+  });
+
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async function(constraints) {
+      await report('media_capture_requested', { constraints: constraints || {} });
+      return originalGetUserMedia(constraints);
+    };
+  }
+
+  const OriginalWebSocket = window.WebSocket;
+  window.WebSocket = function(url, protocols) {
+    report('websocket_runtime', { url: String(url || '') });
+    return new OriginalWebSocket(url, protocols);
+  };
+  window.WebSocket.prototype = OriginalWebSocket.prototype;
 
   document.addEventListener('click', (ev) => {
     const a = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
@@ -1747,8 +2384,16 @@ VORTEX_BRIDGE_JS = r"""
     const res = await fetch(`${proxyBase}/proxy?viewer=${encodeURIComponent(viewerToken)}`, {
       method: 'POST',
       headers: {'content-type': 'application/json'},
-      body: JSON.stringify({ url: target, method, headers: {'content-type': 'application/x-www-form-urlencoded'}, body_b64: btoa(body.toString()) })
+      body: JSON.stringify({
+        url: target,
+        method,
+        headers: {'content-type': 'application/x-www-form-urlencoded'},
+        body_b64: btoa(body.toString())
+      })
     });
+    if (res.status >= 400) {
+      report('upstream_error', { status: res.status, url: target });
+    }
     if (res.redirected) {
       window.location.href = res.url;
       return;
@@ -1779,6 +2424,9 @@ VORTEX_BRIDGE_JS = r"""
       headers: {'content-type': 'application/json'},
       body: JSON.stringify({ url: abs(requestUrl), method, headers, body_b64 })
     });
+    if (res.status >= 400) {
+      report('upstream_error', { status: res.status, url: abs(requestUrl) });
+    }
     return res;
   };
 
@@ -1806,12 +2454,16 @@ VORTEX_BRIDGE_JS = r"""
       body: JSON.stringify(payload)
     }).then(async (resp) => {
       const text = await resp.text();
+      if (resp.status >= 400) {
+        report('upstream_error', { status: resp.status, url });
+      }
       Object.defineProperty(xhr, 'readyState', {value: 4, configurable: true});
       Object.defineProperty(xhr, 'status', {value: resp.status, configurable: true});
       Object.defineProperty(xhr, 'responseText', {value: text, configurable: true});
       if (xhr.onreadystatechange) xhr.onreadystatechange();
       if (xhr.onload) xhr.onload();
     }).catch((err) => {
+      report('client_error', { message: String(err || 'xhr failed') });
       if (xhr.onerror) xhr.onerror(err);
     });
   };
@@ -1823,6 +2475,11 @@ VORTEX_BRIDGE_JS = r"""
     if (value.startsWith('data:') || value.startsWith('blob:')) return;
     el.setAttribute(attr, proxyAsset(value));
   });
+
+  const mediaNodes = document.querySelectorAll('video, audio');
+  if (mediaNodes.length > 0) {
+    report('media_runtime', { count: mediaNodes.length });
+  }
 })();
 """
 
@@ -1974,8 +2631,8 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
   <style>
     html, body {{ margin: 0; padding: 0; height: 100%; background: #070a16; overflow: hidden; }}
     #content {{ position: fixed; inset: 0; }}
-    iframe, img {{ width: 100%; height: 100%; border: 0; display: block; background: #000; }}
-    img {{ object-fit: contain; cursor: crosshair; }}
+    iframe, canvas {{ width: 100%; height: 100%; border: 0; display: block; background: #000; }}
+    canvas {{ touch-action: none; outline: none; cursor: default; }}
   </style>
 </head>
 <body>
@@ -1986,13 +2643,17 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
     const viewerToken = {json.dumps(viewer_token)};
     const content = document.getElementById('content');
     let renderMode = {json.dumps(render_mode)};
+    let frameWs = null;
+    let canvas = null;
+    let ctx = null;
 
     function pageUrl() {{
       return `/api/browser/sessions/${{sessionId}}/page?viewer=${{encodeURIComponent(viewerToken)}}&t=${{Date.now()}}`;
     }}
 
-    function streamUrl() {{
-      return `/api/browser/sessions/${{sessionId}}/stream.jpg?viewer=${{encodeURIComponent(viewerToken)}}&t=${{Date.now()}}`;
+    function frameWsUrl() {{
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      return `${{proto}}://${{location.host}}/ws/frame/${{sessionId}}?ticket=${{encodeURIComponent(ticket)}}`;
     }}
 
     async function sendAction(payload) {{
@@ -2011,43 +2672,101 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
       }});
     }}
 
+    function closeFrameSocket() {{
+      if (frameWs) {{
+        try {{ frameWs.close(); }} catch {{}}
+        frameWs = null;
+      }}
+    }}
+
     function mountTranslate() {{
+      closeFrameSocket();
       const f = document.createElement('iframe');
       f.referrerPolicy = 'no-referrer';
-      f.allow = 'autoplay; encrypted-media';
+      f.allow = 'autoplay; encrypted-media; microphone; camera';
       f.sandbox = 'allow-scripts allow-forms allow-same-origin allow-downloads';
       f.src = pageUrl();
       content.replaceChildren(f);
+      pushResize().catch(() => {{}});
+    }}
+
+    function openFrameSocket() {{
+      closeFrameSocket();
+      frameWs = new WebSocket(frameWsUrl());
+      frameWs.binaryType = 'arraybuffer';
+      frameWs.onmessage = async (ev) => {{
+        if (!canvas || !ctx) return;
+        const blob = new Blob([ev.data], {{ type: 'image/jpeg' }});
+        const bitmap = await createImageBitmap(blob);
+        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {{
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+        }}
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+      }};
+    }}
+
+    function canvasPoint(ev) {{
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width > 0 ? (canvas.width / rect.width) : 1;
+      const scaleY = canvas.height > 0 ? (canvas.height / rect.height) : 1;
+      return {{
+        x: (ev.clientX - rect.left) * scaleX,
+        y: (ev.clientY - rect.top) * scaleY
+      }};
     }}
 
     function mountStream() {{
-      const img = document.createElement('img');
-      img.src = streamUrl();
+      canvas = document.createElement('canvas');
+      canvas.tabIndex = 0;
+      ctx = canvas.getContext('2d', {{ alpha: false, desynchronized: true }});
+      content.replaceChildren(canvas);
+      openFrameSocket();
 
-      img.addEventListener('click', async (ev) => {{
-        const rect = img.getBoundingClientRect();
-        const scaleX = img.naturalWidth > 0 ? (img.naturalWidth / rect.width) : 1;
-        const scaleY = img.naturalHeight > 0 ? (img.naturalHeight / rect.height) : 1;
-        const x = (ev.clientX - rect.left) * scaleX;
-        const y = (ev.clientY - rect.top) * scaleY;
-        await sendAction({{ type: 'click', x, y }});
-        img.src = streamUrl();
+      canvas.addEventListener('pointermove', async (ev) => {{
+        const p = canvasPoint(ev);
+        await sendAction({{ type: 'move', x: p.x, y: p.y }});
       }});
+
+      canvas.addEventListener('pointerdown', async (ev) => {{
+        canvas.focus();
+        const p = canvasPoint(ev);
+        await sendAction({{ type: 'mouse_down', x: p.x, y: p.y, button: ev.button === 2 ? 'right' : 'left' }});
+      }});
+
+      canvas.addEventListener('pointerup', async (ev) => {{
+        const p = canvasPoint(ev);
+        await sendAction({{ type: 'mouse_up', x: p.x, y: p.y, button: ev.button === 2 ? 'right' : 'left' }});
+      }});
+
+      canvas.addEventListener('wheel', async (ev) => {{
+        ev.preventDefault();
+        await sendAction({{ type: 'wheel', delta_x: ev.deltaX, delta_y: ev.deltaY }});
+      }}, {{ passive: false }});
 
       window.addEventListener('keydown', async (ev) => {{
-        if (ev.key.length === 1 || ['Enter','Backspace','Escape','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(ev.key)) {{
-          await sendAction({{ type: 'key', key: ev.key }});
-          img.src = streamUrl();
-        }}
+        if (!canvas) return;
+        await sendAction({{ type: 'key_down', key: ev.key }});
       }});
 
-      content.replaceChildren(img);
+      window.addEventListener('keyup', async (ev) => {{
+        if (!canvas) return;
+        await sendAction({{ type: 'key_up', key: ev.key }});
+      }});
+
+      window.addEventListener('paste', async (ev) => {{
+        const text = ev.clipboardData ? ev.clipboardData.getData('text/plain') : '';
+        if (!text) return;
+        await sendAction({{ type: 'type', text }});
+      }});
+
+      pushResize().catch(() => {{}});
     }}
 
     function mountCurrentMode() {{
       if (renderMode === 'stream') mountStream();
       else mountTranslate();
-      pushResize().catch(() => {{}});
     }}
 
     window.addEventListener('resize', () => {{
@@ -2070,10 +2789,7 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
           return;
         }}
 
-        if (renderMode === 'stream') {{
-          const img = content.querySelector('img');
-          if (img) img.src = streamUrl();
-        }} else {{
+        if (renderMode === 'translate') {{
           const f = content.querySelector('iframe');
           if (f) f.src = pageUrl();
         }}
@@ -2093,6 +2809,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
     auth = AuthManager(cfg)
     egress = EgressManager(cfg)
     runtime = BrowserRuntime(cfg)
+    terminals = TerminalRuntime()
     login_limiter = SlidingWindowRateLimiter()
     api_limiter = SlidingWindowRateLimiter()
 
@@ -2118,8 +2835,11 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "browser_mode": cfg.browser.get("mode", "hybrid"),
             "strip_common_junk": bool(cfg.browser.get("strip_common_junk", True)),
             "block_aggressive_popups": bool(cfg.browser.get("block_aggressive_popups", True)),
-            "screenshot_fps": int(cfg.browser.get("screenshot_fps", 4)),
+            "screenshot_fps": int(cfg.browser.get("screenshot_fps", 30)),
             "screenshot_quality": int(cfg.browser.get("screenshot_quality", 85)),
+            "max_tabs_per_session": int(cfg.browser.get("max_tabs_per_session", MAX_TABS_PER_SESSION)),
+            "remote_width_cap": int(cfg.browser.get("remote_width_cap", DEFAULT_REMOTE_WIDTH_CAP)),
+            "remote_height_cap": int(cfg.browser.get("remote_height_cap", DEFAULT_REMOTE_HEIGHT_CAP)),
             "serve_ui": bool(cfg.raw.get("frontend", {}).get("serve_ui", False)),
             "ui_html_path": str(cfg.raw.get("frontend", {}).get("ui_html_path", "")),
             "totp_enabled": bool(totp_cfg.get("enabled")),
@@ -2133,6 +2853,8 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 for d in cfg.auth.get("paired_devices", [])
             ],
             "available_routes": ["direct", "wireguard", "tor"],
+            "blob_sync": True,
+            "terminal": True,
         }
 
     @app.on_event("startup")
@@ -2188,9 +2910,15 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 "public_base_url": cfg.server.get("public_base_url"),
                 "egress": egress.describe(),
                 "browser_mode": cfg.browser.get("mode", "hybrid"),
+                "features": {
+                    "translation": True,
+                    "remote_fallback": True,
+                    "terminal": True,
+                    "blob_sync": True,
+                },
             },
             headers={
-                "content-security-policy": f"default-src 'self'; frame-ancestors {' '.join(cfg.server.get('frame_ancestors') or ['*'])}; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:;",
+                "content-security-policy": f"default-src 'self'; frame-ancestors {' '.join(cfg.server.get('frame_ancestors') or ['*'])}; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:;",
             },
         )
 
@@ -2204,6 +2932,12 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 "public_base_url": cfg.server.get("public_base_url"),
                 "egress": egress.describe(),
                 "browser_mode": cfg.browser.get("mode", "hybrid"),
+                "features": {
+                    "translation": True,
+                    "remote_fallback": True,
+                    "terminal": True,
+                    "blob_sync": True,
+                },
             }
         )
 
@@ -2213,6 +2947,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "ok": True,
             "time": utc_now(),
             "sessions": len(runtime.sessions),
+            "terminal_sessions": len(terminals.sessions),
             "egress": egress.describe(),
         })
 
@@ -2359,13 +3094,64 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             cfg.browser["block_aggressive_popups"] = bool(payload["block_aggressive_popups"])
 
         if "screenshot_fps" in payload:
-            cfg.browser["screenshot_fps"] = max(1, min(10, int(payload["screenshot_fps"])))
+            cfg.browser["screenshot_fps"] = max(1, min(MAX_REMOTE_FPS, int(payload["screenshot_fps"])))
 
         if "screenshot_quality" in payload:
             cfg.browser["screenshot_quality"] = max(40, min(95, int(payload["screenshot_quality"])))
 
+        if "max_tabs_per_session" in payload:
+            cfg.browser["max_tabs_per_session"] = max(1, min(32, int(payload["max_tabs_per_session"])))
+
         await persist_cfg()
         return JSONResponse(node_settings_payload())
+
+    @app.post("/api/node/update")
+    async def node_update(request: Request) -> JSONResponse:
+        await require_access(request)
+        result = apply_startup_updates(cfg.raw, restart_after_backend_update=False)
+        updated = result.get("updated", []) or []
+        if "backend" in updated:
+            loop = asyncio.get_running_loop()
+            loop.call_later(0.75, lambda: restart_current_process("Backend update applied. Restarting Vortex Node..."))
+        return JSONResponse({
+            "ok": True,
+            "checked": bool(result.get("checked")),
+            "updated": updated,
+            "error": result.get("error"),
+            "will_restart": "backend" in updated,
+        })
+
+    @app.post("/api/node/reset")
+    async def node_reset(request: Request) -> JSONResponse:
+        await require_access(request)
+        payload = await request.json()
+        preserve_config = bool(payload.get("preserve_config", True))
+        clear_synced_profiles = bool(payload.get("clear_synced_profiles", True))
+
+        for session in list(runtime.sessions.values()):
+            with contextlib.suppress(Exception):
+                await session.close()
+
+        for path in [BROWSER_STATE_DIR, LOG_DIR, SESSION_DIR, RUNTIME_DIR, WIREGUARD_DIR]:
+            shutil.rmtree(path, ignore_errors=True)
+            path.mkdir(parents=True, exist_ok=True)
+
+        if clear_synced_profiles:
+            shutil.rmtree(SYNCED_BLOB_DIR, ignore_errors=True)
+            SYNCED_BLOB_DIR.mkdir(parents=True, exist_ok=True)
+
+        cfg.auth["paired_devices"] = []
+        cfg.auth.setdefault("totp", {})["enabled"] = False
+        cfg.auth.setdefault("totp", {})["secret"] = ""
+
+        if preserve_config:
+            await persist_cfg()
+
+        return JSONResponse({
+            "ok": True,
+            "preserve_config": preserve_config,
+            "clear_synced_profiles": clear_synced_profiles,
+        })
 
     @app.get("/api/me")
     async def me(request: Request) -> JSONResponse:
@@ -2380,6 +3166,52 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "node_settings": node_settings_payload(),
         })
 
+    @app.get("/api/profile/blob")
+    async def get_profile_blob(request: Request) -> Response:
+        claims = await require_access(request)
+        path = synced_blob_path(str(claims.get("sub", cfg.auth.get("username", "owner"))))
+        if not path.exists():
+            raise HTTPException(404, "No synced Vortex OS blob exists for this user")
+        return Response(path.read_bytes(), media_type="application/json", headers={"cache-control": "no-store"})
+
+    @app.put("/api/profile/blob")
+    async def put_profile_blob(request: Request) -> JSONResponse:
+        claims = await require_access(request)
+        body = await request.body()
+        if len(body) > MAX_BODY_PREVIEW * 8:
+            raise HTTPException(413, "Blob is too large")
+        try:
+            json.loads(body.decode("utf-8"))
+        except Exception as exc:
+            raise HTTPException(400, "Profile blob must be valid JSON") from exc
+        path = synced_blob_path(str(claims.get("sub", cfg.auth.get("username", "owner"))))
+        write_private_text(path, body.decode("utf-8"))
+        return JSONResponse({"ok": True, "path": str(path)})
+
+    @app.post("/api/terminal/sessions")
+    async def create_terminal_session(request: Request) -> JSONResponse:
+        claims = await require_access(request)
+        session = await terminals.create_session(str(claims.get("sub", cfg.auth.get("username", "owner"))))
+        return JSONResponse({
+            "ok": True,
+            "session_id": session.session_id,
+            "cwd": session.cwd,
+            "created_at": session.created_at,
+        })
+
+    @app.post("/api/terminal/sessions/{session_id}/exec")
+    async def exec_terminal_session(session_id: str, request: Request) -> JSONResponse:
+        await require_access(request)
+        payload = await request.json()
+        result = await terminals.exec(session_id, str(payload.get("command", "")))
+        return JSONResponse(result)
+
+    @app.delete("/api/terminal/sessions/{session_id}")
+    async def delete_terminal_session(session_id: str, request: Request) -> JSONResponse:
+        await require_access(request)
+        await terminals.close_session(session_id)
+        return JSONResponse({"ok": True})
+
     @app.post("/api/browser/sessions")
     async def create_browser_session(request: Request) -> JSONResponse:
         claims = await require_access(request)
@@ -2388,9 +3220,10 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         url = str(payload.get("url", "")).strip()
         if not url:
             raise HTTPException(400, "url is required")
-        parsed = urllib.parse.urlparse(url)
-        if parsed.scheme not in {"http", "https"}:
-            raise HTTPException(400, "Only http/https URLs are supported")
+        if url != "about:blank":
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme not in {"http", "https"}:
+                raise HTTPException(400, "Only http/https URLs are supported")
 
         mode = str(payload.get("mode") or cfg.browser.get("mode", "hybrid")).lower()
         if mode not in {"translate", "stream", "hybrid"}:
@@ -2408,6 +3241,9 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         )
 
         ticket = auth.issue_embed_ticket(str(claims.get("sub")), session_id=session.session_id)
+        public_base = str(cfg.server.get("public_base_url", "")).rstrip("/")
+        ws_base = public_base.replace("https://", "wss://").replace("http://", "ws://")
+
         return JSONResponse({
             "session_id": session.session_id,
             "url": session.last_url,
@@ -2416,9 +3252,12 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "effective_mode": session.effective_mode,
             "route_mode": session.route_mode,
             "analysis": session.analysis,
-            "embed_url": f"{cfg.server.get('public_base_url')}/embed/{session.session_id}?ticket={urllib.parse.quote(ticket, safe='')}&viewer={urllib.parse.quote(session.viewer_token, safe='')}&mode={session.effective_mode}",
-            "page_url": f"{cfg.server.get('public_base_url')}/api/browser/sessions/{session.session_id}/page?viewer={urllib.parse.quote(session.viewer_token, safe='')}",
+            "embed_url": f"{public_base}/embed/{session.session_id}?ticket={urllib.parse.quote(ticket, safe='')}&viewer={urllib.parse.quote(session.viewer_token, safe='')}&mode={session.effective_mode}",
+            "page_url": f"{public_base}/api/browser/sessions/{session.session_id}/page?viewer={urllib.parse.quote(session.viewer_token, safe='')}",
             "viewer_token": session.viewer_token,
+            "tabs": session.tabs_payload(),
+            "active_tab_id": session.active_tab_id,
+            "ws_url": f"{ws_base}/ws/session/{session.session_id}?ticket={urllib.parse.quote(ticket, safe='')}",
         })
 
     @app.get("/api/browser/sessions")
@@ -2437,6 +3276,8 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 "analysis": session.analysis,
                 "created_at": session.created_at,
                 "updated_at": session.updated_at,
+                "tabs": session.tabs_payload(),
+                "active_tab_id": session.active_tab_id,
             })
         return JSONResponse({"sessions": data})
 
@@ -2448,7 +3289,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             raise HTTPException(401, "invalid viewer token")
         html = make_remote_shell(session.session_id, session.last_title or "Remote Web", session.effective_mode, ticket, session.viewer_token)
         return HTMLResponse(html, headers={
-            "content-security-policy": f"default-src 'self' blob: data:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-ancestors {' '.join(cfg.server.get('frame_ancestors') or ['*'])};",
+            "content-security-policy": f"default-src 'self' blob: data:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:; frame-ancestors {' '.join(cfg.server.get('frame_ancestors') or ['*'])};",
             "x-frame-options": "ALLOWALL",
         })
 
@@ -2462,7 +3303,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 raise HTTPException(401, "invalid viewer token")
         session = runtime.get(session_id)
         return HTMLResponse(session.last_render_html, headers={
-            "content-security-policy": f"default-src 'self' data: blob:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-ancestors {' '.join(cfg.server.get('frame_ancestors') or ['*'])};",
+            "content-security-policy": f"default-src 'self' data: blob:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:; frame-ancestors {' '.join(cfg.server.get('frame_ancestors') or ['*'])};",
         })
 
     @app.get("/api/browser/sessions/{session_id}/render")
@@ -2527,6 +3368,15 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 passthrough_headers[header] = upstream.headers[header]
         return Response(content=upstream.content, status_code=upstream.status_code, headers=passthrough_headers)
 
+    @app.post("/api/browser/sessions/{session_id}/event")
+    async def browser_event(session_id: str, request: Request, viewer: str | None = None) -> JSONResponse:
+        session = runtime.get(session_id)
+        if viewer != session.viewer_token:
+            raise HTTPException(401, "invalid viewer token")
+        payload = await request.json()
+        await session.note_translation_event(str(payload.get("type", "")), dict(payload.get("detail") or {}))
+        return JSONResponse({"ok": True, "render_mode": session.effective_mode})
+
     @app.get("/api/browser/sessions/{session_id}/stream.jpg")
     async def browser_stream_jpg(session_id: str, ticket: str | None = None, viewer: str | None = None) -> Response:
         if ticket:
@@ -2557,14 +3407,29 @@ def create_app(cfg: NodeConfig) -> FastAPI:
 
         if action_type == "click":
             await session.click(float(payload.get("x", 0)), float(payload.get("y", 0)), button=str(payload.get("button", "left")))
+        elif action_type == "move":
+            await session.mouse_move(float(payload.get("x", 0)), float(payload.get("y", 0)))
+        elif action_type == "mouse_down":
+            await session.mouse_down(float(payload.get("x", 0)), float(payload.get("y", 0)), button=str(payload.get("button", "left")))
+        elif action_type == "mouse_up":
+            await session.mouse_up(float(payload.get("x", 0)), float(payload.get("y", 0)), button=str(payload.get("button", "left")))
+        elif action_type == "wheel":
+            await session.wheel(float(payload.get("delta_x", 0)), float(payload.get("delta_y", 0)))
         elif action_type == "type":
             await session.type_text(str(payload.get("text", "")))
         elif action_type == "key":
             await session.key_press(str(payload.get("key", "Enter")))
+        elif action_type == "key_down":
+            await session.key_down(str(payload.get("key", "Enter")))
+        elif action_type == "key_up":
+            await session.key_up(str(payload.get("key", "Enter")))
         elif action_type == "fill":
             await session.fill_selector(str(payload.get("selector", "")), str(payload.get("value", "")))
         elif action_type == "navigate":
-            await session.navigate(str(payload.get("url", "")))
+            url = str(payload.get("url", "")).strip()
+            if url != "about:blank":
+                url = ensure_http_https_url(url)
+            await session.navigate(url or "about:blank")
         elif action_type == "back":
             await session.go_back()
         elif action_type == "forward":
@@ -2573,6 +3438,15 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             await session.reload()
         elif action_type == "resize":
             await session.resize(int(payload.get("width", 1366)), int(payload.get("height", 900)))
+        elif action_type == "new_tab":
+            url = str(payload.get("url", "about:blank")).strip() or "about:blank"
+            if url != "about:blank":
+                url = ensure_http_https_url(url)
+            await session.create_tab(url)
+        elif action_type == "activate_tab":
+            await session.activate_tab(str(payload.get("tab_id") or payload.get("tabId") or ""))
+        elif action_type == "close_tab":
+            await session.close_tab(str(payload.get("tab_id") or payload.get("tabId") or ""))
         else:
             raise HTTPException(400, "Unsupported action")
 
@@ -2583,6 +3457,8 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "status": session.last_status,
             "render_mode": session.effective_mode,
             "route_mode": session.route_mode,
+            "tabs": session.tabs_payload(),
+            "active_tab_id": session.active_tab_id,
         })
 
     @app.delete("/api/browser/sessions/{session_id}")
@@ -2610,6 +3486,9 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 "status": session.last_status,
                 "render_mode": session.effective_mode,
                 "route_mode": session.route_mode,
+                "tabs": session.tabs_payload(),
+                "active_tab_id": session.active_tab_id,
+                "stream_reason": session.force_stream_reason,
             })
             while True:
                 data = await websocket.receive_json()
@@ -2622,10 +3501,37 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                     await session.navigate(str(data.get("url", "")))
                 elif cmd == "reload":
                     await session.reload()
+                elif cmd == "new_tab":
+                    await session.create_tab(str(data.get("url", "about:blank")))
+                elif cmd == "activate_tab":
+                    await session.activate_tab(str(data.get("tab_id", "")))
+                elif cmd == "close_tab":
+                    await session.close_tab(str(data.get("tab_id", "")))
         except WebSocketDisconnect:
             pass
         finally:
             await runtime.hub.disconnect(session_id, websocket)
+
+    @app.websocket("/ws/frame/{session_id}")
+    async def frame_ws(websocket: WebSocket, session_id: str, ticket: str) -> None:
+        try:
+            auth.require_embed_ticket(ticket, session_id=session_id)
+        except Exception:
+            await websocket.close(code=1008)
+            return
+
+        session = runtime.get(session_id)
+        await runtime.frame_hub.connect(session_id, websocket)
+        try:
+            frame = await session.latest_frame()
+            if frame:
+                await websocket.send_bytes(frame)
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            await runtime.frame_hub.disconnect(session_id, websocket)
 
     @app.get("/api/install/guide")
     async def install_guide() -> PlainTextResponse:
@@ -2653,9 +3559,12 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "bs4_installed": BeautifulSoup is not None,
             "egress": egress.describe(),
             "node_settings": node_settings_payload(),
+            "terminal_sessions": len(terminals.sessions),
+            "browser_sessions": len(runtime.sessions),
         })
 
     return app
+
 
 
 def build_tmux_start_command(python_executable: str | None = None) -> str:
@@ -2728,20 +3637,20 @@ def get_install_guide() -> str:
 
         Ubuntu 24 install
         ------------------------------------
-        1) Copy vortex_network.py and your Vortex OS HTML file (for example: vortexos.html) into the same folder.
+        1) Copy vortex_network.py and your Vortex OS HTML file (for example: vortex_os.html) into the same folder.
 
         2) Install system packages you are likely to need:
            sudo apt update
-           sudo apt install -y tmux nginx certbot python3-certbot-nginx curl iproute2 wireguard tor
+           sudo apt install -y tmux nginx certbot python3-certbot-nginx curl iproute2 wireguard wireguard-tools tor ffmpeg xvfb x11-xserver-utils pulseaudio pulseaudio-utils dbus-x11
 
         3) Create and activate a conda environment:
            conda create -n vortex-node python=3.11 -y
            conda activate vortex-node
 
         4) Install Python packages:
-           pip install fastapi uvicorn[standard] httpx[socks] beautifulsoup4 lxml playwright pyotp qrcode[pil]
+           pip install fastapi uvicorn[standard] httpx[socks] beautifulsoup4 lxml playwright pyotp qrcode[pil] aiortc av
            playwright install chromium
-           playwright install-deps chromium
+           sudo $(which python) -m playwright install-deps chromium
 
         5) Run the installer with sudo so route modes / systemd can be configured automatically:
            sudo $(which python) vortex_network.py install
@@ -2758,6 +3667,8 @@ def get_install_guide() -> str:
         9) Open your node URL in a browser. If frontend serving is enabled, the node will serve the Vortex OS UI at /.
 
         10) Unlock your Vortex OS profile, then connect Vortex OS to the node from Settings > Network.
+
+        11) To use microphone passthrough from the browser, serve the node over HTTPS. Browser microphone capture requires a secure context.
         """
     ).strip() + "\n"
 
@@ -2802,7 +3713,7 @@ def doctor() -> int:
     problems = []
     print(f"{APP_NAME} doctor\n")
 
-    for name in ["tmux", "nginx", "certbot", "curl", "ip", "wg", "tor"]:
+    for name in ["tmux", "nginx", "certbot", "curl", "ip", "wg", "tor", "ffmpeg", "Xvfb", "xrandr", "pulseaudio", "pactl"]:
         print(f"{name}: {which(name) or 'not found'}")
 
     if FastAPI is None:
@@ -2819,6 +3730,10 @@ def doctor() -> int:
         problems.append("pyotp is not installed")
     if qrcode is None:
         problems.append("qrcode[pil] is not installed")
+    if RTCPeerConnection is None:
+        problems.append("aiortc is not installed")
+    if av is None:
+        problems.append("av is not installed")
 
     if not CONFIG_PATH.exists():
         problems.append(f"missing config: {CONFIG_PATH}")
@@ -2842,6 +3757,10 @@ def install_flow() -> int:
 
     if cfg["ops"].get("run_on_boot"):
         install_systemd_service()
+
+    if cfg["server"].get("exposure_mode") == "public" and cfg["ops"].get("auto_https"):
+        print("Configuring Nginx and HTTPS...")
+        configure_public_https(NodeConfig(cfg), str(cfg["ops"].get("certbot_email", "")))
 
     if cfg["ops"].get("use_tmux"):
         if which("tmux") is None:
