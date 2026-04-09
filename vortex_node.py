@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Vortex Network
-Single-file self-hosted node for Vortex OS.
+Single file self hosted node for Vortex OS.
 
 Modes:
   python vortex_node.py install
@@ -10,7 +10,7 @@ Modes:
   python vortex_node.py doctor
   python vortex_node.py print-nginx
 
-This script intentionally keeps everything in one file:
+This script keeps everything in one file:
 - interactive installer / config wizard
 - FastAPI web server
 - auth + rate limiting
@@ -990,13 +990,102 @@ def synced_blob_path(username: str) -> pathlib.Path:
 def strip_ansi_codes(text: str) -> str:
     return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text or "")
 
+def guess_ssh_port() -> int:
+    sshd_config = pathlib.Path("/etc/ssh/sshd_config")
+    try:
+        for raw_line in sshd_config.read_text("utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            match = re.match(r"(?i)^Port\s+(\d+)\s*$", line)
+            if match:
+                return int(match.group(1))
+    except Exception:
+        pass
+    return 22
+
+
+def ensure_public_firewall_access(domain: str) -> list[str]:
+    notes: list[str] = []
+
+    if sys.platform != "linux":
+        notes.append("Firewall auto-configuration skipped because this platform is not Linux.")
+        return notes
+
+    ssh_port = guess_ssh_port()
+
+    if which("ufw") is not None:
+        run_command(["ufw", "allow", f"{ssh_port}/tcp"], check=False)
+        run_command(["ufw", "allow", "OpenSSH"], check=False)
+
+        nginx_profile = run_command(["ufw", "app", "info", "Nginx Full"], check=False)
+        if nginx_profile.returncode == 0:
+            run_command(["ufw", "allow", "Nginx Full"], check=True)
+            notes.append("UFW rule added: Nginx Full")
+        else:
+            run_command(["ufw", "allow", "80/tcp"], check=True)
+            run_command(["ufw", "allow", "443/tcp"], check=True)
+            notes.append("UFW rules added: 80/tcp and 443/tcp")
+
+        status = run_command(["ufw", "status"], check=False)
+        stdout = (status.stdout or "").strip()
+        if "Status: inactive" in stdout:
+            run_command(["ufw", "--force", "enable"], check=True)
+            notes.append(f"UFW enabled and SSH preserved on port {ssh_port}.")
+        else:
+            notes.append(f"UFW already active; ensured SSH/{ssh_port}, HTTP, and HTTPS are allowed.")
+        return notes
+
+    if which("firewall-cmd") is not None:
+        state = run_command(["firewall-cmd", "--state"], check=False)
+        if state.returncode == 0:
+            run_command(["firewall-cmd", "--permanent", "--add-service=http"], check=True)
+            run_command(["firewall-cmd", "--permanent", "--add-service=https"], check=True)
+            run_command(["firewall-cmd", "--reload"], check=True)
+            notes.append("firewalld updated to allow HTTP and HTTPS.")
+            return notes
+
+    notes.append(
+        "No supported local firewall manager was found. "
+        "Local firewall changes were skipped. If port 80 is still unreachable, the provider firewall or security-group may still need to be opened."
+    )
+    return notes
+
+
+def wait_for_local_http_listener(domain: str, timeout_seconds: int = 20) -> None:
+    deadline = time.time() + timeout_seconds
+    last_error = ""
+
+    while time.time() < deadline:
+        probe = run_command(
+            [
+                "curl",
+                "--silent",
+                "--show-error",
+                "--head",
+                "--max-time", "5",
+                "--header", f"Host: {domain}",
+                "http://127.0.0.1/",
+            ],
+            check=False,
+        )
+        if probe.returncode == 0:
+            return
+        last_error = ((probe.stderr or "") + "\n" + (probe.stdout or "")).strip()
+        time.sleep(1)
+
+    raise RuntimeError(
+        "Nginx did not become reachable on local port 80 after configuration.\n"
+        f"Last probe output:\n{last_error}"
+    )
+
 def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
     if sys.platform != "linux":
         raise RuntimeError("Automatic Nginx/Certbot setup is only implemented for Linux.")
     if os.geteuid() != 0:
         raise RuntimeError("Run the installer with sudo/root to configure Nginx and HTTPS automatically.")
 
-    apt_install(["nginx", "certbot", "python3-certbot-nginx"])
+    apt_install(["nginx", "certbot", "python3-certbot-nginx", "ufw"])
 
     public_base = str(cfg.server.get("public_base_url", "")).strip()
     parsed = urllib.parse.urlparse(public_base)
@@ -1004,12 +1093,16 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
     if not domain or domain in {"localhost", "127.0.0.1"}:
         raise RuntimeError("A real public domain is required for automatic HTTPS setup.")
 
+    firewall_notes = ensure_public_firewall_access(domain)
+    for note in firewall_notes:
+        print(note)
+
     upstream = f"http://{cfg.server.get('host', '127.0.0.1')}:{int(cfg.server.get('port', 8787))}"
     site_path = pathlib.Path("/etc/nginx/sites-available/vortex-node")
     enabled_path = pathlib.Path("/etc/nginx/sites-enabled/vortex-node")
     letsencrypt_live_dir = pathlib.Path("/etc/letsencrypt/live") / domain
 
-    nginx_http_conf = textwrap.dedent(f"""
+    nginx_conf = textwrap.dedent(f"""
     map $http_upgrade $connection_upgrade {{
         default upgrade;
         ''      close;
@@ -1036,8 +1129,7 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
     }}
     """).strip() + "\n"
 
-    site_path.write_text(nginx_http_conf, "utf-8")
-
+    site_path.write_text(nginx_conf, "utf-8")
     if enabled_path.exists() or enabled_path.is_symlink():
         enabled_path.unlink()
     enabled_path.symlink_to(site_path)
@@ -1066,6 +1158,8 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
             f"stderr:\n{exc.stderr or ''}"
         ) from exc
 
+    wait_for_local_http_listener(domain)
+
     email = str(certbot_email or "").strip()
     if not email:
         email = f"admin@{domain}"
@@ -1083,10 +1177,16 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
     try:
         run_command(certbot_cmd, check=True)
     except subprocess.CalledProcessError as exc:
+        notes_text = "\n".join(firewall_notes)
         raise RuntimeError(
             "Certbot failed while requesting/configuring HTTPS.\n"
-            "Common causes are: DNS not pointing at this VPS yet, port 80 blocked, or another web server already using the domain.\n"
-            f"stdout:\n{exc.stdout or ''}\n"
+            "The installer already tried to open the local firewall for HTTP/HTTPS.\n"
+            "If it still timed out, the remaining likely causes are:\n"
+            "  - DNS is not pointing at this VPS yet\n"
+            "  - the VPS provider / control-panel firewall is still blocking port 80\n"
+            "  - another external network policy is blocking inbound HTTP\n"
+            f"\nFirewall actions attempted:\n{notes_text}\n"
+            f"\nstdout:\n{exc.stdout or ''}\n"
             f"stderr:\n{exc.stderr or ''}"
         ) from exc
 
