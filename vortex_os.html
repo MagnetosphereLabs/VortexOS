@@ -4521,19 +4521,32 @@
         const win = openWindows.get(appId);
         if (!win) return;
 
+        const browserState = (appId === "vortex-browser")
+          ? browserWindowState("vortex-browser")
+          : null;
+        
         const remoteSessionId =
           win.querySelector(".appHost")?.dataset?.vortexSessionId ||
-          (appId === "vortex-browser" ? vortexBrowserState.sessionId : "");
-
+          (browserState ? browserState.sessionId : "");
+        
         if (remoteSessionId && networkConnected()){
           nodeFetch(`/api/browser/sessions/${encodeURIComponent(remoteSessionId)}`, { method: "DELETE" }).catch(()=>{});
         }
-
-        if (appId === "vortex-browser"){
-          vortexBrowserState.sessionId = "";
-          vortexBrowserState.embedUrl = "";
-          vortexBrowserState.currentUrl = "";
-          vortexBrowserState.title = "";
+        
+        if (browserState){
+          browserState.sessionId = "";
+          browserState.embedUrl = "";
+          browserState.currentUrl = "";
+          browserState.title = "";
+          browserState.mode = "hybrid";
+          browserState.tabs = [];
+          browserState.activeTabId = null;
+          browserState.routeMode = "default";
+          browserState.wsUrl = "";
+          if (browserState.ws){
+            try { browserState.ws.close(); } catch {}
+            browserState.ws = null;
+          }
         }
         
         win.classList.remove("open", "minimized");
@@ -5401,7 +5414,7 @@
             browserRouteMode: net.browserRouteMode || "default",
             networkedAppsDefault: net.networkedAppsDefault !== false,
             lastConnectedAt: net.lastConnectedAt || 0,
-            currentBrowserUrl: vortexBrowserState.currentUrl || "",
+            currentBrowserUrl: browserWindowState("vortex-browser").currentUrl || "",
             stripCommonJunk: nodeSettings.stripCommonJunk !== false,
             blockAggressivePopups: nodeSettings.blockAggressivePopups !== false,
             screenshotFps: nodeSettings.screenshotFps || 4,
