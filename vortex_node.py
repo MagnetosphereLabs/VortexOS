@@ -4,11 +4,11 @@ Vortex Network
 Single-file self-hosted node for Vortex OS.
 
 Modes:
-  python vortex_network.py install
-  python vortex_network.py run
-  python vortex_network.py service-install
-  python vortex_network.py doctor
-  python vortex_network.py print-nginx
+  python vortex_node.py install
+  python vortex_node.py run
+  python vortex_node.py service-install
+  python vortex_node.py doctor
+  python vortex_node.py print-nginx
 
 This script intentionally keeps everything in one file:
 - interactive installer / config wizard
@@ -610,7 +610,7 @@ def factory_reset_flow(*, reinstall: bool = False) -> int:
     if reinstall:
         return install_flow()
 
-    print("Node state erased. Run `python vortex_network.py install` to configure it again.")
+    print(f"Node state erased. Run `python {SCRIPT_PATH.name} install` to configure it again.")
     return 0
 
 def free_display_number(start: int = DEFAULT_XVFB_START_DISPLAY, stop: int = DEFAULT_XVFB_START_DISPLAY + 60) -> int:
@@ -3634,40 +3634,40 @@ def get_install_guide() -> str:
         f"""
         {APP_NAME} {APP_VERSION}
         ======================
-
+    
         Ubuntu 24 install
         ------------------------------------
-        1) Copy vortex_network.py and your Vortex OS HTML file (for example: vortex_os.html) into the same folder.
-
+        1) Copy {SCRIPT_PATH.name} and your Vortex OS HTML file (for example: vortex_os.html) into the same folder.
+    
         2) Install system packages you are likely to need:
            sudo apt update
            sudo apt install -y tmux nginx certbot python3-certbot-nginx curl iproute2 wireguard wireguard-tools tor ffmpeg xvfb x11-xserver-utils pulseaudio pulseaudio-utils dbus-x11
-
+    
         3) Create and activate a conda environment:
            conda create -n vortex-node python=3.11 -y
            conda activate vortex-node
-
+    
         4) Install Python packages:
            pip install fastapi uvicorn[standard] httpx[socks] beautifulsoup4 lxml playwright pyotp qrcode[pil] aiortc av
            playwright install chromium
            sudo $(which python) -m playwright install-deps chromium
-
+    
         5) Run the installer with sudo so route modes / systemd can be configured automatically:
-           sudo $(which python) vortex_network.py install
-
+           sudo $(which python) {SCRIPT_PATH.name} install
+    
         6) Start the node:
-           sudo $(which python) vortex_network.py run
-
+           sudo $(which python) {SCRIPT_PATH.name} run
+    
         7) Optional tmux background start:
            sudo {build_tmux_start_command()}
-
+    
         8) Put Nginx in front of the node and terminate TLS there.
            The Python service can stay on 127.0.0.1:{current_port}
-
+    
         9) Open your node URL in a browser. If frontend serving is enabled, the node will serve the Vortex OS UI at /.
-
+    
         10) Unlock your Vortex OS profile, then connect Vortex OS to the node from Settings > Network.
-
+    
         11) To use microphone passthrough from the browser, serve the node over HTTPS. Browser microphone capture requires a secure context.
         """
     ).strip() + "\n"
