@@ -1,2 +1,3 @@
 # VortexOS
-Browser based virtual OS
+A new kind of computing experience that puts *you* in control.
+WIP
