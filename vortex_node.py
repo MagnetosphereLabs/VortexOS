@@ -1007,8 +1007,9 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
     upstream = f"http://{cfg.server.get('host', '127.0.0.1')}:{int(cfg.server.get('port', 8787))}"
     site_path = pathlib.Path("/etc/nginx/sites-available/vortex-node")
     enabled_path = pathlib.Path("/etc/nginx/sites-enabled/vortex-node")
+    letsencrypt_live_dir = pathlib.Path("/etc/letsencrypt/live") / domain
 
-    nginx_conf = textwrap.dedent(f"""
+    nginx_http_conf = textwrap.dedent(f"""
     map $http_upgrade $connection_upgrade {{
         default upgrade;
         ''      close;
@@ -1016,6 +1017,7 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
 
     server {{
         listen 80;
+        listen [::]:80;
         server_name {domain};
 
         client_max_body_size 64m;
@@ -1024,15 +1026,18 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
             proxy_pass {upstream};
             proxy_http_version 1.1;
             proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
         }}
     }}
     """).strip() + "\n"
 
-    site_path.write_text(nginx_conf, "utf-8")
+    site_path.write_text(nginx_http_conf, "utf-8")
+
     if enabled_path.exists() or enabled_path.is_symlink():
         enabled_path.unlink()
     enabled_path.symlink_to(site_path)
@@ -1042,23 +1047,65 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
         with contextlib.suppress(Exception):
             default_site.unlink()
 
-    run_command(["nginx", "-t"], check=True)
-    run_command(["systemctl", "enable", "--now", "nginx"], check=False)
-    run_command(["systemctl", "reload", "nginx"], check=False)
+    try:
+        run_command(["nginx", "-t"], check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "Nginx config test failed before starting Nginx.\n"
+            f"stdout:\n{exc.stdout or ''}\n"
+            f"stderr:\n{exc.stderr or ''}"
+        ) from exc
+
+    try:
+        run_command(["systemctl", "enable", "--now", "nginx"], check=True)
+        run_command(["systemctl", "reload", "nginx"], check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "Failed to start or reload Nginx.\n"
+            f"stdout:\n{exc.stdout or ''}\n"
+            f"stderr:\n{exc.stderr or ''}"
+        ) from exc
 
     email = str(certbot_email or "").strip()
     if not email:
         email = f"admin@{domain}"
 
-    run_command([
+    certbot_cmd = [
         "certbot",
         "--nginx",
         "--non-interactive",
         "--agree-tos",
         "--redirect",
-        "-m", email,
-        "-d", domain,
-    ], check=False)
+        "--email", email,
+        "--domain", domain,
+    ]
+
+    try:
+        run_command(certbot_cmd, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "Certbot failed while requesting/configuring HTTPS.\n"
+            "Common causes are: DNS not pointing at this VPS yet, port 80 blocked, or another web server already using the domain.\n"
+            f"stdout:\n{exc.stdout or ''}\n"
+            f"stderr:\n{exc.stderr or ''}"
+        ) from exc
+
+    if not letsencrypt_live_dir.exists():
+        raise RuntimeError(
+            f"Certbot reported success but no certificate directory was created at {letsencrypt_live_dir}"
+        )
+
+    try:
+        run_command(["nginx", "-t"], check=True)
+        run_command(["systemctl", "reload", "nginx"], check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "HTTPS was requested, but the final Nginx validation/reload failed.\n"
+            f"stdout:\n{exc.stdout or ''}\n"
+            f"stderr:\n{exc.stderr or ''}"
+        ) from exc
+
+    print(f"HTTPS is configured for https://{domain}")
 
 @dataclasses.dataclass
 class TerminalSessionState:
@@ -3661,8 +3708,8 @@ WantedBy=multi-user.target
         return
 
     service_path.write_text(content, "utf-8")
-    subprocess.run(["systemctl", "daemon-reload"], check=False)
-    subprocess.run(["systemctl", "enable", "--now", "vortex-node"], check=False)
+    run_command(["systemctl", "daemon-reload"], check=True)
+    run_command(["systemctl", "enable", "--now", "vortex-node"], check=True)
     print(f"Installed and started {service_path}")
 
 
@@ -3814,9 +3861,10 @@ def install_flow() -> int:
             print(f"Background start command:\n  {build_tmux_start_command()}\n")
             print_tmux_hint()
 
-    print("Nginx/Certbot snippet:\n")
-    print_nginx_snippet(NodeConfig(cfg))
-    print("\nInstaller finished. Start the node with:\n  python vortex_network.py run\n")
+    if not (cfg["server"].get("exposure_mode") == "public" and cfg["ops"].get("auto_https")):
+        print("Nginx/Certbot snippet:\n")
+        print_nginx_snippet(NodeConfig(cfg))
+    print(f"\nInstaller finished. Start the node with:\n  python {SCRIPT_PATH.name} run\n")
     return 0
 
 
