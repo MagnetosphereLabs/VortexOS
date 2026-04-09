@@ -3796,31 +3796,55 @@
         return data;
       }
 
+      function windowIdFromSource(source, expectedBaseAppId = ""){
+        for (const [windowId, win] of openWindows.entries()){
+          const frame = win.querySelector("iframe");
+          if (frame && frame.contentWindow === source){
+            if (!expectedBaseAppId || baseAppIdFromWindowId(windowId) === expectedBaseAppId){
+              return windowId;
+            }
+          }
+        }
+        return expectedBaseAppId || "";
+      }
+      
       async function disconnectVortexNetwork(){
         const n = getNetworkCfg();
         n.enabled = false;
         n.accessToken = "";
         n.pairingToken = "";
         n.status = "offline";
-
-        if (vortexBrowserState.sessionId){
+      
+        const browserState = browserWindowState("vortex-browser");
+        if (browserState.sessionId){
           try{
-            await nodeFetch(`/api/browser/sessions/${encodeURIComponent(vortexBrowserState.sessionId)}`, { method: "DELETE" });
+            await nodeFetch(`/api/browser/sessions/${encodeURIComponent(browserState.sessionId)}`, { method: "DELETE" });
           } catch {}
         }
-
-        vortexBrowserState.sessionId = "";
-        vortexBrowserState.embedUrl = "";
-        vortexBrowserState.currentUrl = "";
-        vortexBrowserState.title = "";
-        vortexBrowserState.tabs = [];
-        vortexBrowserState.activeTabId = null;
-
+        if (browserState.ws){
+          try{ browserState.ws.close(); } catch {}
+        }
+        delete remoteBrowserWindows["vortex-browser"];
+      
+        const termState = terminalWindowState("vortex-terminal");
+        if (termState.sessionId){
+          try{
+            await nodeFetch(`/api/terminal/sessions/${encodeURIComponent(termState.sessionId)}`, { method: "DELETE" });
+          } catch {}
+        }
+        delete terminalStates["vortex-terminal"];
+      
         await persistConfig();
         syncSettingsIframe();
-        syncBrowserIframe();
+        syncBrowserIframe("vortex-browser");
+        syncTerminalIframe("vortex-terminal", {
+          connected: false,
+          cwd: "offline",
+          output: "Disconnected from Vortex Node.\n",
+          reset: true
+        });
       }
-
+      
       async function refreshVortexNetworkStatus(){
         const res = await nodeFetch("/api/me");
         const data = await res.json();
@@ -3830,19 +3854,24 @@
         await persistConfig();
         await fetchNodeSettings();
         syncSettingsIframe();
-        syncBrowserIframe();
+        syncBrowserIframe("vortex-browser");
+        syncTerminalIframe("vortex-terminal", {
+          connected: true,
+          output: "Vortex Node status refreshed.\n"
+        });
         return data;
       }
-
+      
       async function createRemoteSession(url, mode, { closePreviousBrowserSession = false, routeModeOverride = "default" } = {}){
         if (!networkConnected()) throw new Error("Connect Vortex Node first.");
-
-        if (closePreviousBrowserSession && vortexBrowserState.sessionId){
+      
+        const state = browserWindowState("vortex-browser");
+        if (closePreviousBrowserSession && state.sessionId){
           try{
-            await nodeFetch(`/api/browser/sessions/${encodeURIComponent(vortexBrowserState.sessionId)}`, { method: "DELETE" });
+            await nodeFetch(`/api/browser/sessions/${encodeURIComponent(state.sessionId)}`, { method: "DELETE" });
           } catch {}
         }
-
+      
         const res = await nodeFetch("/api/browser/sessions", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -3852,71 +3881,159 @@
             route_mode_override: routeModeOverride || "default"
           })
         });
-
+      
         return await res.json();
       }
-
-      async function openRemoteUrlInBrowser(url, routeModeOverride = "default"){
+      
+      function bindBrowserSessionSocket(windowId = "vortex-browser"){
+        const state = browserWindowState(windowId);
+        if (state.ws){
+          try{ state.ws.close(); } catch {}
+          state.ws = null;
+        }
+        if (!state.wsUrl) return;
+      
+        state.ws = new WebSocket(state.wsUrl);
+        state.ws.onmessage = (ev)=>{
+          try{
+            const msg = JSON.parse(ev.data);
+            if (!msg || msg.type !== "session_update") return;
+            state.currentUrl = msg.url || state.currentUrl;
+            state.title = msg.title || state.title;
+            state.mode = msg.render_mode || state.mode;
+            state.routeMode = msg.route_mode || state.routeMode;
+            state.tabs = Array.isArray(msg.tabs) ? msg.tabs : state.tabs;
+            state.activeTabId = msg.active_tab_id || state.activeTabId;
+            syncBrowserIframe(windowId);
+          } catch {}
+        };
+      }
+      
+      async function openRemoteUrlInBrowser(url, routeModeOverride = "default", windowId = "vortex-browser"){
         openApp("vortex-browser");
-        syncBrowserIframe();
-
         const data = await createRemoteSession(url, getNetworkCfg().browserMode || "hybrid", {
           closePreviousBrowserSession: true,
           routeModeOverride
         });
-
-        vortexBrowserState.sessionId = data.session_id || "";
-        vortexBrowserState.embedUrl = data.embed_url || "";
-        vortexBrowserState.currentUrl = data.url || url;
-        vortexBrowserState.title = data.title || "Browser";
-        vortexBrowserState.mode = data.effective_mode || data.mode || (getNetworkCfg().browserMode || "hybrid");
-        vortexBrowserState.routeMode = data.route_mode || routeModeOverride || "default";
-        vortexBrowserState.tabs = Array.isArray(data.tabs) ? data.tabs : [];
-        vortexBrowserState.activeTabId = data.active_tab_id || null;
-        vortexBrowserState.lastOpenedAt = Date.now();
-
-        syncBrowserIframe();
+      
+        const state = browserWindowState(windowId);
+        state.sessionId = data.session_id || "";
+        state.embedUrl = data.embed_url || "";
+        state.currentUrl = data.url || url;
+        state.title = data.title || "Browser";
+        state.mode = data.effective_mode || data.mode || (getNetworkCfg().browserMode || "hybrid");
+        state.routeMode = data.route_mode || routeModeOverride || "default";
+        state.tabs = Array.isArray(data.tabs) ? data.tabs : [];
+        state.activeTabId = data.active_tab_id || null;
+        state.wsUrl = data.ws_url || "";
+        state.lastOpenedAt = Date.now();
+      
+        bindBrowserSessionSocket(windowId);
+        syncBrowserIframe(windowId);
         return data;
       }
-
-      async function browserSessionAction(type, extra = {}){
-        if (!vortexBrowserState.sessionId) throw new Error("No active Vortex Browser session.");
-
-        const res = await nodeFetch(`/api/browser/sessions/${encodeURIComponent(vortexBrowserState.sessionId)}/action`, {
+      
+      async function browserSessionAction(type, extra = {}, windowId = "vortex-browser"){
+        const state = browserWindowState(windowId);
+        if (!state.sessionId) throw new Error("No active Vortex Browser session.");
+      
+        const res = await nodeFetch(`/api/browser/sessions/${encodeURIComponent(state.sessionId)}/action`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(Object.assign({ type }, extra))
         });
-
+      
         const data = await res.json();
-        vortexBrowserState.currentUrl = data.url || vortexBrowserState.currentUrl;
-        vortexBrowserState.title = data.title || vortexBrowserState.title;
-        if (data.render_mode) vortexBrowserState.mode = data.render_mode;
-        if (data.route_mode) vortexBrowserState.routeMode = data.route_mode;
-        if (Array.isArray(data.tabs)) vortexBrowserState.tabs = data.tabs;
-        if (data.active_tab_id) vortexBrowserState.activeTabId = data.active_tab_id;
-        syncBrowserIframe();
+        state.currentUrl = data.url || state.currentUrl;
+        state.title = data.title || state.title;
+        state.mode = data.render_mode || state.mode;
+        state.routeMode = data.route_mode || state.routeMode;
+        state.tabs = Array.isArray(data.tabs) ? data.tabs : state.tabs;
+        state.activeTabId = data.active_tab_id || state.activeTabId;
+        syncBrowserIframe(windowId);
         return data;
       }
-
-      function syncBrowserIframe(){
-        const win = openWindows.get("vortex-browser");
+      
+      function syncBrowserIframe(windowId = "vortex-browser"){
+        const win = openWindows.get(windowId);
         if (!win) return;
         const frame = win.querySelector("iframe");
+        const state = browserWindowState(windowId);
         frame?.contentWindow?.postMessage({
           type: "vortex.browser.state",
           state: {
             connected: networkConnected(),
             nodeUrl: getNetworkCfg().nodeUrl || "",
-            embedUrl: vortexBrowserState.embedUrl || "",
-            currentUrl: vortexBrowserState.currentUrl || "",
-            title: vortexBrowserState.title || "",
-            mode: getNetworkCfg().browserMode || "hybrid",
-            routeMode: vortexBrowserState.routeMode || getNetworkCfg().browserRouteMode || "default",
-            tabs: vortexBrowserState.tabs || [],
-            activeTabId: vortexBrowserState.activeTabId || null
+            embedUrl: state.embedUrl || "",
+            currentUrl: state.currentUrl || "",
+            title: state.title || "",
+            mode: state.mode || (getNetworkCfg().browserMode || "hybrid"),
+            routeMode: state.routeMode || getNetworkCfg().browserRouteMode || "default",
+            tabs: state.tabs || [],
+            activeTabId: state.activeTabId || null
           }
         }, "*");
+      }
+      
+      async function ensureTerminalSession(windowId = "vortex-terminal"){
+        if (!networkConnected()) {
+          syncTerminalIframe(windowId, {
+            connected: false,
+            cwd: "offline",
+            output: "Connect Vortex Node in Settings to use Terminal.\n",
+            reset: true
+          });
+          return null;
+        }
+      
+        const state = terminalWindowState(windowId);
+        if (state.sessionId) return state;
+      
+        const res = await nodeFetch("/api/terminal/sessions", {
+          method: "POST"
+        });
+        const data = await res.json();
+      
+        state.sessionId = data.session_id || "";
+        state.cwd = data.cwd || "~";
+        state.connected = true;
+        syncTerminalIframe(windowId, {
+          connected: true,
+          cwd: state.cwd,
+          output: "Connected to Vortex Node terminal.\n",
+          reset: true
+        });
+        return state;
+      }
+      
+      function syncTerminalIframe(windowId = "vortex-terminal", patch = {}){
+        const win = openWindows.get(windowId);
+        if (!win) return;
+        const state = Object.assign(terminalWindowState(windowId), patch);
+        const frame = win.querySelector("iframe");
+        frame?.contentWindow?.postMessage({
+          type: "vortex.terminal.state",
+          state
+        }, "*");
+      }
+      
+      async function execTerminalCommand(command, windowId = "vortex-terminal"){
+        const state = await ensureTerminalSession(windowId);
+        if (!state) return;
+      
+        const res = await nodeFetch(`/api/terminal/sessions/${encodeURIComponent(state.sessionId)}/exec`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ command })
+        });
+        const data = await res.json();
+        state.cwd = data.cwd || state.cwd;
+        state.connected = true;
+        syncTerminalIframe(windowId, {
+          connected: true,
+          cwd: state.cwd,
+          output: data.output || ""
+        });
       }
       
       function tplHtml(id){
@@ -5466,51 +5583,83 @@
         }
         
         if (msg.type === "vortex.browser.ready"){
-          syncBrowserIframe();
+          const windowId = windowIdFromSource(event.source, "vortex-browser") || "vortex-browser";
+          syncBrowserIframe(windowId);
           return;
         }
-
+        
         if (msg.type === "vortex.browser.action"){
+          const windowId = windowIdFromSource(event.source, "vortex-browser") || "vortex-browser";
           try{
             if (msg.action === "navigate"){
               const raw = String(msg.input || "").trim();
               if (!raw) return;
-
+        
               const looksLikeUrl =
                 /^https?:\/\//i.test(raw) ||
                 /^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(raw);
-
+        
               const target = looksLikeUrl
                 ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
                 : buildSearchUrl(raw, decryptedConfig?.os?.searchEngine || "duckduckgo", false);
-
+        
               if (!target) return;
-
-              if (vortexBrowserState.sessionId){
-                await browserSessionAction("navigate", { url: target });
+        
+              const state = browserWindowState(windowId);
+              if (state.sessionId){
+                await browserSessionAction("navigate", { url: target }, windowId);
               } else {
-                await openRemoteUrlInBrowser(target, getNetworkCfg().browserRouteMode || "default");
+                await openRemoteUrlInBrowser(target, getNetworkCfg().browserRouteMode || "default", windowId);
               }
             } else if (msg.action === "reload"){
-              await browserSessionAction("reload");
+              await browserSessionAction("reload", {}, windowId);
             } else if (msg.action === "back"){
-              await browserSessionAction("back");
+              await browserSessionAction("back", {}, windowId);
             } else if (msg.action === "forward"){
-              await browserSessionAction("forward");
+              await browserSessionAction("forward", {}, windowId);
             } else if (msg.action === "new_tab"){
               const target = String(msg.url || "about:blank").trim() || "about:blank";
-              if (vortexBrowserState.sessionId){
-                await browserSessionAction("new_tab", { url: target });
+              const state = browserWindowState(windowId);
+              if (state.sessionId){
+                await browserSessionAction("new_tab", { url: target }, windowId);
               } else {
-                await openRemoteUrlInBrowser(target === "about:blank" ? "https://example.com" : target, getNetworkCfg().browserRouteMode || "default");
+                await openRemoteUrlInBrowser(target === "about:blank" ? "https://example.com" : target, getNetworkCfg().browserRouteMode || "default", windowId);
               }
             } else if (msg.action === "activate_tab"){
-              await browserSessionAction("activate_tab", { tab_id: String(msg.tabId || "") });
+              await browserSessionAction("activate_tab", { tab_id: String(msg.tabId || "") }, windowId);
             } else if (msg.action === "close_tab"){
-              await browserSessionAction("close_tab", { tab_id: String(msg.tabId || "") });
+              await browserSessionAction("close_tab", { tab_id: String(msg.tabId || "") }, windowId);
             }
           } catch (err){
             alert(err && err.message ? err.message : "Vortex Browser request failed.");
+          }
+          return;
+        }
+        
+        if (msg.type === "vortex.terminal.ready"){
+          const windowId = windowIdFromSource(event.source, "vortex-terminal") || "vortex-terminal";
+          try{
+            await ensureTerminalSession(windowId);
+          } catch (err){
+            syncTerminalIframe(windowId, {
+              connected: false,
+              cwd: "offline",
+              output: (err && err.message ? err.message : "Unable to start terminal.") + "\n",
+              reset: true
+            });
+          }
+          return;
+        }
+        
+        if (msg.type === "vortex.terminal.command"){
+          const windowId = windowIdFromSource(event.source, "vortex-terminal") || "vortex-terminal";
+          try{
+            await execTerminalCommand(String(msg.command || ""), windowId);
+          } catch (err){
+            syncTerminalIframe(windowId, {
+              connected: true,
+              output: (err && err.message ? err.message : "Terminal execution failed.") + "\n"
+            });
           }
           return;
         }
