@@ -34,6 +34,13 @@ import hmac
 import html as html_lib
 import io
 import json
+import select
+import pty
+import pwd
+import fcntl
+import termios
+import struct
+import signal
 import mimetypes
 import os
 import pathlib
@@ -453,7 +460,9 @@ def migrate_config(raw: dict[str, t.Any]) -> dict[str, t.Any]:
     raw["server"].setdefault("exposure_mode", "lan")
 
     raw.setdefault("browser", {})
-    raw["browser"].setdefault("mode", "hybrid")
+    raw["browser"].setdefault("mode", "stream")
+    if str(raw["browser"].get("mode") or "").lower() != "stream":
+        raw["browser"]["mode"] = "stream"
     raw["browser"].setdefault("max_sessions", 4)
     raw["browser"].setdefault("max_tabs_per_session", MAX_TABS_PER_SESSION)
     raw["browser"].setdefault("viewport", {"width": 1366, "height": 900})
@@ -461,8 +470,8 @@ def migrate_config(raw: dict[str, t.Any]) -> dict[str, t.Any]:
     raw["browser"].setdefault("block_aggressive_popups", True)
     raw["browser"].setdefault("strip_common_junk", True)
     raw["browser"].setdefault("allow_media_proxy", True)
-    raw["browser"].setdefault("screenshot_quality", 85)
-    raw["browser"].setdefault("screenshot_fps", 30)
+    raw["browser"].setdefault("screenshot_quality", 80)
+    raw["browser"].setdefault("screenshot_fps", 60)
     raw["browser"].setdefault("remote_width_cap", DEFAULT_REMOTE_WIDTH_CAP)
     raw["browser"].setdefault("remote_height_cap", DEFAULT_REMOTE_HEIGHT_CAP)
     raw["browser"].setdefault("detection", {})
@@ -1214,23 +1223,16 @@ class TerminalSessionState:
     cwd: str
     created_at: str
     updated_at: str
+    pid: int
+    fd: int
+    rows: int = 34
+    cols: int = 120
+
 
 class TerminalRuntime:
     def __init__(self) -> None:
         self.sessions: dict[str, TerminalSessionState] = {}
         self._lock = asyncio.Lock()
-
-    async def create_session(self, username: str) -> TerminalSessionState:
-        session = TerminalSessionState(
-            session_id=secrets.token_urlsafe(12),
-            username=str(username or "owner"),
-            cwd=str(pathlib.Path.home()),
-            created_at=utc_now(),
-            updated_at=utc_now(),
-        )
-        async with self._lock:
-            self.sessions[session.session_id] = session
-        return session
 
     def get(self, session_id: str) -> TerminalSessionState:
         session = self.sessions.get(session_id)
@@ -1238,13 +1240,113 @@ class TerminalRuntime:
             raise HTTPException(404, "Unknown terminal session")
         return session
 
-    async def close_session(self, session_id: str) -> None:
+    def _resolve_user(self, username: str) -> tuple[int | None, int | None, str]:
+        try:
+            pw = pwd.getpwnam(username)
+            return pw.pw_uid, pw.pw_gid, pw.pw_dir
+        except Exception:
+            home = os.path.expanduser("~")
+            return None, None, home
+
+    def _set_winsize(self, fd: int, rows: int, cols: int) -> None:
+        packed = struct.pack("HHHH", max(2, int(rows)), max(8, int(cols)), 0, 0)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
+
+    def _spawn_shell(self, username: str, rows: int = 34, cols: int = 120) -> tuple[int, int, str]:
+        uid, gid, home = self._resolve_user(username)
+        shell = os.environ.get("SHELL") or "/bin/bash"
+        cwd = home or os.path.expanduser("~")
+
+        master_fd, slave_fd = pty.openpty()
+        self._set_winsize(slave_fd, rows, cols)
+
+        pid = os.fork()
+        if pid == 0:
+            try:
+                os.setsid()
+                os.dup2(slave_fd, 0)
+                os.dup2(slave_fd, 1)
+                os.dup2(slave_fd, 2)
+                with contextlib.suppress(Exception):
+                    os.close(master_fd)
+                with contextlib.suppress(Exception):
+                    os.close(slave_fd)
+
+                env = os.environ.copy()
+                env.setdefault("TERM", "xterm-256color")
+                env.setdefault("COLORTERM", "truecolor")
+                env["HOME"] = cwd
+                env["SHELL"] = shell
+                env["USER"] = username
+                env["LOGNAME"] = username
+                env["LANG"] = env.get("LANG") or "C.UTF-8"
+
+                os.chdir(cwd)
+                if os.geteuid() == 0 and gid is not None:
+                    os.setgid(gid)
+                if os.geteuid() == 0 and uid is not None:
+                    os.setuid(uid)
+                os.execvpe(shell, [shell, "-il"], env)
+            except Exception:
+                os._exit(1)
+
+        os.close(slave_fd)
+        flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+        fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+        return pid, master_fd, cwd
+
+    async def create_session(self, username: str) -> TerminalSessionState:
+        session_id = secrets.token_urlsafe(12)
+        pid, fd, cwd = await asyncio.to_thread(self._spawn_shell, str(username or "owner"))
+        session = TerminalSessionState(
+            session_id=session_id,
+            username=str(username or "owner"),
+            cwd=cwd,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+            pid=pid,
+            fd=fd,
+        )
         async with self._lock:
-            self.sessions.pop(session_id, None)
+            self.sessions[session.session_id] = session
+        return session
+
+    async def resize(self, session_id: str, rows: int, cols: int) -> TerminalSessionState:
+        session = self.get(session_id)
+        session.rows = max(2, int(rows or session.rows))
+        session.cols = max(8, int(cols or session.cols))
+        await asyncio.to_thread(self._set_winsize, session.fd, session.rows, session.cols)
+        session.updated_at = utc_now()
+        return session
+
+    def _read_ready(self, fd: int, timeout: float = 0.1) -> bytes | None:
+        try:
+            ready, _, _ = select.select([fd], [], [], timeout)
+            if not ready:
+                return None
+            return os.read(fd, 65536)
+        except BlockingIOError:
+            return None
+        except OSError:
+            return b""
+
+    async def read_chunk(self, session_id: str, timeout: float = 0.1) -> bytes | None:
+        session = self.get(session_id)
+        data = await asyncio.to_thread(self._read_ready, session.fd, timeout)
+        if data is not None:
+            session.updated_at = utc_now()
+        return data
+
+    async def write(self, session_id: str, data: bytes) -> None:
+        session = self.get(session_id)
+        if not data:
+            return
+        await asyncio.to_thread(os.write, session.fd, data)
+        session.updated_at = utc_now()
 
     async def exec(self, session_id: str, command: str) -> dict[str, t.Any]:
         session = self.get(session_id)
-        command = str(command or "").rstrip()
+        command = str(command or "")
         if not command:
             return {
                 "ok": True,
@@ -1253,46 +1355,33 @@ class TerminalRuntime:
                 "exit_code": 0,
                 "session_id": session.session_id,
             }
-
-        script = (
-            f"cd {shlex_quote(session.cwd)}\n"
-            f"{command}\n"
-            "printf '\\n__VORTEX_CWD__=%s\\n' \"$PWD\"\n"
-        )
-
-        proc = await asyncio.create_subprocess_exec(
-            "/bin/bash",
-            "-lc",
-            script,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=os.environ.copy(),
-        )
-        stdout, stderr = await proc.communicate()
-
-        combined = (stdout or b"").decode("utf-8", "replace") + (stderr or b"").decode("utf-8", "replace")
-        combined = strip_ansi_codes(combined)
-
-        marker = "__VORTEX_CWD__="
-        new_cwd = session.cwd
-        idx = combined.rfind(marker)
-        if idx != -1:
-            tail = combined[idx + len(marker):].strip()
-            tail_line = tail.splitlines()[0].strip() if tail else ""
-            if tail_line:
-                new_cwd = tail_line
-            combined = combined[:idx].rstrip() + ("\n" if combined[:idx].strip() else "")
-
-        session.cwd = new_cwd
-        session.updated_at = utc_now()
-
+        await self.write(session_id, (command + "\n").encode("utf-8", "replace"))
+        await asyncio.sleep(0.12)
+        chunks: list[bytes] = []
+        for _ in range(12):
+            part = await self.read_chunk(session_id, timeout=0.03)
+            if part is None:
+                break
+            if part == b"":
+                break
+            chunks.append(part)
         return {
-            "ok": proc.returncode == 0,
+            "ok": True,
             "cwd": session.cwd,
-            "output": combined,
-            "exit_code": int(proc.returncode or 0),
+            "output": b"".join(chunks).decode("utf-8", "replace"),
+            "exit_code": 0,
             "session_id": session.session_id,
         }
+
+    async def close_session(self, session_id: str) -> None:
+        async with self._lock:
+            session = self.sessions.pop(session_id, None)
+        if not session:
+            return
+        with contextlib.suppress(Exception):
+            os.killpg(session.pid, signal.SIGHUP)
+        with contextlib.suppress(Exception):
+            os.close(session.fd)
 
 class FrameSocketHub:
     def __init__(self) -> None:
@@ -1465,15 +1554,8 @@ def ask_install_config() -> dict[str, t.Any]:
         tor_cfg["socks_url"] = prompt("Tor SOCKS URL", default=DEFAULT_TOR_SOCKS)
         tor_cfg["install_if_missing"] = prompt_yes_no("Install/start Tor automatically if needed?", default=True)
 
-    browser_mode = prompt_choice(
-        "Default browser virtualization mode",
-        [
-            ("hybrid", "Translation first, automatic live remote fallback"),
-            ("translate", "Always prefer translated/local render"),
-            ("stream", "Always prefer live remote mode"),
-        ],
-        default_key="hybrid",
-    )
+    print("Current stable browser virtualization mode: live remote")
+    browser_mode = "stream"
 
     max_sessions = prompt_int("Maximum simultaneous browser windows", default=4, minimum=1)
     max_tabs_per_session = prompt_int("Maximum tabs per browser window", default=MAX_TABS_PER_SESSION, minimum=1)
@@ -1546,8 +1628,8 @@ def ask_install_config() -> dict[str, t.Any]:
             "block_aggressive_popups": True,
             "strip_common_junk": True,
             "allow_media_proxy": True,
-            "screenshot_quality": 85,
-            "screenshot_fps": 30,
+            "screenshot_quality": 70,
+            "screenshot_fps": 60,
             "remote_width_cap": DEFAULT_REMOTE_WIDTH_CAP,
             "remote_height_cap": DEFAULT_REMOTE_HEIGHT_CAP,
             "detection": {
@@ -1668,6 +1750,18 @@ class AuthManager:
         }
         return sign_token(self.cfg.auth["secret_key"], payload)
 
+    def issue_terminal_ticket(self, subject: str, *, session_id: str) -> str:
+        ttl = int(self.cfg.auth.get("access_token_ttl_seconds", 3600))
+        payload = {
+            "sub": subject,
+            "kind": "terminal",
+            "session_id": session_id,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + ttl,
+            "jti": secrets.token_urlsafe(16),
+        }
+        return sign_token(self.cfg.auth["secret_key"], payload)
+  
     def require_access_token(self, token: str) -> dict[str, t.Any]:
         payload = verify_token(self.cfg.auth["secret_key"], token)
         if payload.get("kind") != "access":
@@ -1688,6 +1782,14 @@ class AuthManager:
             raise ValueError("wrong session")
         return payload
 
+    def require_terminal_ticket(self, ticket: str, *, session_id: str) -> dict[str, t.Any]:
+        payload = verify_token(self.cfg.auth["secret_key"], ticket)
+        if payload.get("kind") != "terminal":
+            raise ValueError("wrong ticket kind")
+        if payload.get("session_id") != session_id:
+            raise ValueError("wrong session")
+        return payload
+  
     def totp_enabled(self) -> bool:
         return bool(self.cfg.auth.get("totp", {}).get("enabled"))
 
@@ -2059,6 +2161,7 @@ class BrowserSession:
         self._frame_event = asyncio.Event()
         self._stream_cdp: t.Any = None
         self._stream_active_tab_id = ""
+        self._stream_viewport: tuple[int, int] = (0, 0)
 
     @property
     def active_page(self) -> Page:
@@ -2252,6 +2355,7 @@ class BrowserSession:
                 await self._stream_cdp.send("Page.stopScreencast")
         self._stream_cdp = None
         self._stream_active_tab_id = ""
+        self._stream_viewport = (0, 0)
 
     async def _on_screencast_frame(self, payload: dict[str, t.Any]) -> None:
         data_b64 = str(payload.get("data") or "")
@@ -2267,30 +2371,42 @@ class BrowserSession:
                     await self._stream_cdp.send("Page.screencastFrameAck", {"sessionId": payload.get("sessionId")})
 
     async def _ensure_screencast(self) -> None:
-        if self._stream_cdp is not None and self._stream_active_tab_id == self.active_tab_id:
+        page = self.active_page
+        viewport = page.viewport_size or self.cfg.browser.get("viewport", {"width": 1366, "height": 900})
+        max_width = min(int(viewport.get("width", 1366)), int(self.cfg.browser.get("remote_width_cap", DEFAULT_REMOTE_WIDTH_CAP)))
+        max_height = min(int(viewport.get("height", 900)), int(self.cfg.browser.get("remote_height_cap", DEFAULT_REMOTE_HEIGHT_CAP)))
+        target_viewport = (max_width, max_height)
+
+        if self._stream_cdp is not None and self._stream_active_tab_id == self.active_tab_id and self._stream_viewport == target_viewport:
             return
 
         await self._stop_screencast()
 
-        page = self.active_page
         assert self.context is not None
         cdp = await self.context.new_cdp_session(page)
         self._stream_cdp = cdp
         self._stream_active_tab_id = self.active_tab_id
+        self._stream_viewport = target_viewport
 
         cdp.on("Page.screencastFrame", lambda payload: asyncio.create_task(self._on_screencast_frame(payload)))
         await cdp.send("Page.enable")
 
-        viewport = page.viewport_size or self.cfg.browser.get("viewport", {"width": 1366, "height": 900})
-        max_width = min(int(viewport.get("width", 1366)), int(self.cfg.browser.get("remote_width_cap", DEFAULT_REMOTE_WIDTH_CAP)))
-        max_height = min(int(viewport.get("height", 900)), int(self.cfg.browser.get("remote_height_cap", DEFAULT_REMOTE_HEIGHT_CAP)))
+        target_fps = max(1, min(MAX_REMOTE_FPS, int(self.cfg.browser.get("screenshot_fps", 60))))
+        if target_fps >= 45:
+            every_nth = 1
+        elif target_fps >= 30:
+            every_nth = 2
+        elif target_fps >= 20:
+            every_nth = 3
+        else:
+            every_nth = 4
 
         await cdp.send("Page.startScreencast", {
             "format": "jpeg",
-            "quality": int(self.cfg.browser.get("screenshot_quality", 85)),
+            "quality": int(self.cfg.browser.get("screenshot_quality", 80)),
             "maxWidth": max_width,
             "maxHeight": max_height,
-            "everyNthFrame": 1,
+            "everyNthFrame": every_nth,
         })
 
     async def latest_frame(self) -> bytes:
@@ -2396,9 +2512,30 @@ class BrowserSession:
         width = max(320, min(3840, int(width)))
         height = max(240, min(2160, int(height)))
         await page.set_viewport_size({"width": width, "height": height})
-        await asyncio.sleep(0.02)
+        self.updated_at = utc_now()
+
         if self.effective_mode == "stream":
+            await self._stop_screencast()
             await self._ensure_screencast()
+            self.last_status = f"ready:resize:{self.effective_mode}"
+            await self.runtime.hub.broadcast(
+                self.session_id,
+                {
+                    "type": "session_update",
+                    "reason": "resize",
+                    "url": self.last_url,
+                    "title": self.last_title,
+                    "status": self.last_status,
+                    "render_mode": self.effective_mode,
+                    "route_mode": self.route_mode,
+                    "tabs": self.tabs_payload(),
+                    "active_tab_id": self.active_tab_id,
+                    "stream_reason": self.force_stream_reason,
+                },
+            )
+            return
+
+        await asyncio.sleep(0.02)
         await self.refresh_render(reason="resize")
 
     async def click(self, x: float, y: float, *, button: str = "left") -> None:
@@ -2831,6 +2968,11 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
     let frameWs = null;
     let canvas = null;
     let ctx = null;
+    let resizeTimer = 0;
+    let moveRaf = 0;
+    let queuedMove = null;
+    let moveInFlight = false;
+    let cleanupFns = [];
 
     function pageUrl() {{
       return `/api/browser/sessions/${{sessionId}}/page?viewer=${{encodeURIComponent(viewerToken)}}&t=${{Date.now()}}`;
@@ -2857,6 +2999,13 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
       }});
     }}
 
+    function scheduleResize() {{
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {{
+        pushResize().catch(() => {{}});
+      }}, 120);
+    }}
+
     function closeFrameSocket() {{
       if (frameWs) {{
         try {{ frameWs.close(); }} catch {{}}
@@ -2864,15 +3013,36 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
       }}
     }}
 
-    function mountTranslate() {{
+    function cleanupMount() {{
+      cleanupFns.forEach((fn) => {{
+        try {{ fn(); }} catch {{}}
+      }});
+      cleanupFns = [];
       closeFrameSocket();
+      canvas = null;
+      ctx = null;
+      queuedMove = null;
+      moveInFlight = false;
+      if (moveRaf) {{
+        cancelAnimationFrame(moveRaf);
+        moveRaf = 0;
+      }}
+    }}
+
+    function on(target, name, handler, options) {{
+      target.addEventListener(name, handler, options);
+      cleanupFns.push(() => target.removeEventListener(name, handler, options));
+    }}
+
+    function mountTranslate() {{
+      cleanupMount();
       const f = document.createElement('iframe');
       f.referrerPolicy = 'no-referrer';
       f.allow = 'autoplay; encrypted-media; microphone; camera';
       f.sandbox = 'allow-scripts allow-forms allow-same-origin allow-downloads';
       f.src = pageUrl();
       content.replaceChildren(f);
-      pushResize().catch(() => {{}});
+      scheduleResize();
     }}
 
     function openFrameSocket() {{
@@ -2902,51 +3072,74 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
       }};
     }}
 
+    async function flushMove() {{
+      moveRaf = 0;
+      if (!queuedMove || moveInFlight) return;
+      moveInFlight = true;
+      const payload = queuedMove;
+      queuedMove = null;
+      try {{
+        await sendAction(payload);
+      }} catch {{}}
+      moveInFlight = false;
+      if (queuedMove && !moveRaf) {{
+        moveRaf = requestAnimationFrame(flushMove);
+      }}
+    }}
+
+    function queueMove(ev) {{
+      const p = canvasPoint(ev);
+      queuedMove = {{ type: 'move', x: p.x, y: p.y }};
+      if (!moveRaf) {{
+        moveRaf = requestAnimationFrame(flushMove);
+      }}
+    }}
+
     function mountStream() {{
+      cleanupMount();
       canvas = document.createElement('canvas');
       canvas.tabIndex = 0;
       ctx = canvas.getContext('2d', {{ alpha: false, desynchronized: true }});
       content.replaceChildren(canvas);
       openFrameSocket();
 
-      canvas.addEventListener('pointermove', async (ev) => {{
-        const p = canvasPoint(ev);
-        await sendAction({{ type: 'move', x: p.x, y: p.y }});
+      on(canvas, 'pointermove', (ev) => {{
+        queueMove(ev);
       }});
 
-      canvas.addEventListener('pointerdown', async (ev) => {{
+      on(canvas, 'pointerdown', (ev) => {{
         canvas.focus();
         const p = canvasPoint(ev);
-        await sendAction({{ type: 'mouse_down', x: p.x, y: p.y, button: ev.button === 2 ? 'right' : 'left' }});
+        sendAction({{ type: 'mouse_down', x: p.x, y: p.y, button: ev.button === 2 ? 'right' : 'left' }}).catch(() => {{}});
       }});
 
-      canvas.addEventListener('pointerup', async (ev) => {{
+      on(canvas, 'pointerup', (ev) => {{
         const p = canvasPoint(ev);
-        await sendAction({{ type: 'mouse_up', x: p.x, y: p.y, button: ev.button === 2 ? 'right' : 'left' }});
+        sendAction({{ type: 'mouse_up', x: p.x, y: p.y, button: ev.button === 2 ? 'right' : 'left' }}).catch(() => {{}});
       }});
 
-      canvas.addEventListener('wheel', async (ev) => {{
+      on(canvas, 'wheel', (ev) => {{
         ev.preventDefault();
-        await sendAction({{ type: 'wheel', delta_x: ev.deltaX, delta_y: ev.deltaY }});
+        sendAction({{ type: 'wheel', delta_x: ev.deltaX, delta_y: ev.deltaY }}).catch(() => {{}});
       }}, {{ passive: false }});
 
-      window.addEventListener('keydown', async (ev) => {{
+      on(window, 'keydown', (ev) => {{
         if (!canvas) return;
-        await sendAction({{ type: 'key_down', key: ev.key }});
+        sendAction({{ type: 'key_down', key: ev.key }}).catch(() => {{}});
       }});
 
-      window.addEventListener('keyup', async (ev) => {{
+      on(window, 'keyup', (ev) => {{
         if (!canvas) return;
-        await sendAction({{ type: 'key_up', key: ev.key }});
+        sendAction({{ type: 'key_up', key: ev.key }}).catch(() => {{}});
       }});
 
-      window.addEventListener('paste', async (ev) => {{
+      on(window, 'paste', (ev) => {{
         const text = ev.clipboardData ? ev.clipboardData.getData('text/plain') : '';
         if (!text) return;
-        await sendAction({{ type: 'type', text }});
+        sendAction({{ type: 'type', text }}).catch(() => {{}});
       }});
 
-      pushResize().catch(() => {{}});
+      scheduleResize();
     }}
 
     function mountCurrentMode() {{
@@ -2955,7 +3148,7 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
     }}
 
     window.addEventListener('resize', () => {{
-      pushResize().catch(() => {{}});
+      scheduleResize();
     }});
 
     mountCurrentMode();
@@ -2998,7 +3191,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
     login_limiter = SlidingWindowRateLimiter()
     api_limiter = SlidingWindowRateLimiter()
 
-    app = FastAPI(title=APP_NAME, version=APP_VERSION, docs_url="/docs", redoc_url="/redoc")
+    app = FastAPI(title=APP_NAME, version=APP_VERSION, docs_url=None, redoc_url=None)
 
     app.add_middleware(
         CORSMiddleware,
@@ -3013,6 +3206,8 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         cfg.raw["updated_at"] = utc_now()
         await asyncio.to_thread(write_json, CONFIG_PATH, cfg.raw)
 
+    frame_ancestors_policy = " ".join(cfg.server.get("frame_ancestors") or ["'self'"])
+  
     def node_settings_payload() -> dict[str, t.Any]:
         totp_cfg = cfg.auth.setdefault("totp", {"enabled": False, "secret": "", "issuer": APP_NAME})
         return {
@@ -3020,8 +3215,9 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "browser_mode": cfg.browser.get("mode", "hybrid"),
             "strip_common_junk": bool(cfg.browser.get("strip_common_junk", True)),
             "block_aggressive_popups": bool(cfg.browser.get("block_aggressive_popups", True)),
-            "screenshot_fps": int(cfg.browser.get("screenshot_fps", 30)),
-            "screenshot_quality": int(cfg.browser.get("screenshot_quality", 85)),
+            "screenshot_fps": int(cfg.browser.get("screenshot_fps", 60)),
+            "screenshot_quality": int(cfg.browser.get("screenshot_quality", 70)),
+            "auto_updates_enabled": bool((cfg.raw.get("updates") or {}).get("enabled", True)),
             "max_tabs_per_session": int(cfg.browser.get("max_tabs_per_session", MAX_TABS_PER_SESSION)),
             "remote_width_cap": int(cfg.browser.get("remote_width_cap", DEFAULT_REMOTE_WIDTH_CAP)),
             "remote_height_cap": int(cfg.browser.get("remote_height_cap", DEFAULT_REMOTE_HEIGHT_CAP)),
@@ -3052,8 +3248,12 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         await runtime.stop()
 
     def client_key(request: Request) -> str:
-        forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        return forwarded or (request.client.host if request.client else "unknown")
+        direct = request.client.host if request.client else "unknown"
+        if direct in {"127.0.0.1", "::1"}:
+            forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            if forwarded:
+                return forwarded
+        return direct
 
     async def require_api_rate_limit(request: Request) -> None:
         key = f"api:{client_key(request)}"
@@ -3267,10 +3467,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             await egress.ensure_ready(new_route)
 
         if "browser_mode" in payload:
-            new_browser_mode = str(payload["browser_mode"]).lower()
-            if new_browser_mode not in {"translate", "stream", "hybrid"}:
-                raise HTTPException(400, "Invalid browser_mode")
-            cfg.browser["mode"] = new_browser_mode
+            cfg.browser["mode"] = "stream"
 
         if "strip_common_junk" in payload:
             cfg.browser["strip_common_junk"] = bool(payload["strip_common_junk"])
@@ -3284,6 +3481,9 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         if "screenshot_quality" in payload:
             cfg.browser["screenshot_quality"] = max(40, min(95, int(payload["screenshot_quality"])))
 
+        if "auto_updates_enabled" in payload:
+            cfg.raw.setdefault("updates", {})["enabled"] = bool(payload["auto_updates_enabled"])
+      
         if "max_tabs_per_session" in payload:
             cfg.browser["max_tabs_per_session"] = max(1, min(32, int(payload["max_tabs_per_session"])))
 
@@ -3377,11 +3577,17 @@ def create_app(cfg: NodeConfig) -> FastAPI:
     async def create_terminal_session(request: Request) -> JSONResponse:
         claims = await require_access(request)
         session = await terminals.create_session(str(claims.get("sub", cfg.auth.get("username", "owner"))))
+        ticket = auth.issue_terminal_ticket(str(claims.get("sub")), session_id=session.session_id)
+        public_base = str(cfg.server.get("public_base_url", "")).rstrip("/")
+        ws_base = public_base.replace("https://", "wss://").replace("http://", "ws://")
         return JSONResponse({
             "ok": True,
             "session_id": session.session_id,
             "cwd": session.cwd,
             "created_at": session.created_at,
+            "rows": session.rows,
+            "cols": session.cols,
+            "ws_url": f"{ws_base}/ws/terminal/{session.session_id}?ticket={urllib.parse.quote(ticket, safe='')}",
         })
 
     @app.post("/api/terminal/sessions/{session_id}/exec")
@@ -3410,9 +3616,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             if parsed.scheme not in {"http", "https"}:
                 raise HTTPException(400, "Only http/https URLs are supported")
 
-        mode = str(payload.get("mode") or cfg.browser.get("mode", "hybrid")).lower()
-        if mode not in {"translate", "stream", "hybrid"}:
-            mode = "hybrid"
+        mode = "stream"
 
         requested_route = str(payload.get("route_mode_override") or "default").lower()
         route_mode = egress.normalize_mode(requested_route)
@@ -3697,6 +3901,57 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         finally:
             await runtime.hub.disconnect(session_id, websocket)
 
+    @app.websocket("/ws/terminal/{session_id}")
+    async def terminal_ws(websocket: WebSocket, session_id: str, ticket: str) -> None:
+        try:
+            auth.require_terminal_ticket(ticket, session_id=session_id)
+        except Exception:
+            await websocket.close(code=1008)
+            return
+
+        session = terminals.get(session_id)
+        await websocket.accept()
+
+        async def pump_output() -> None:
+            while True:
+                chunk = await terminals.read_chunk(session_id, timeout=0.2)
+                if chunk is None:
+                    continue
+                if chunk == b"":
+                    await websocket.send_json({"type": "exit"})
+                    return
+                await websocket.send_json({
+                    "type": "output",
+                    "data_b64": base64.b64encode(chunk).decode("ascii"),
+                })
+
+        pump_task = asyncio.create_task(pump_output())
+        try:
+            await websocket.send_json({
+                "type": "ready",
+                "cwd": session.cwd,
+                "rows": session.rows,
+                "cols": session.cols,
+            })
+            while True:
+                raw = await websocket.receive_text()
+                payload = json.loads(raw) if raw else {}
+                action = str(payload.get("type", "")).lower()
+                if action == "input":
+                    data_b64 = str(payload.get("data_b64") or payload.get("data") or "")
+                    if data_b64:
+                        await terminals.write(session_id, base64.b64decode(data_b64))
+                elif action == "resize":
+                    session = await terminals.resize(session_id, int(payload.get("rows", session.rows)), int(payload.get("cols", session.cols)))
+                elif action == "ping":
+                    await websocket.send_json({"type": "pong", "time": utc_now()})
+        except WebSocketDisconnect:
+            pass
+        finally:
+            pump_task.cancel()
+            with contextlib.suppress(Exception):
+                await pump_task
+  
     @app.websocket("/ws/frame/{session_id}")
     async def frame_ws(websocket: WebSocket, session_id: str, ticket: str) -> None:
         try:
