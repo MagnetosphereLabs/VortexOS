@@ -9,6 +9,10 @@ To install our alpha build, start with any Ubuntu VPS you have nothing important
 curl -fsSL https://raw.githubusercontent.com/MagnetosphereLabs/VortexOS/main/vortex_installer.sh | sudo bash
 ```
 
+To view live logs, simply use this command:
+```
+sudo journalctl -u vortex-node.service --lines=1000 --follow
+```
 
 To uninstall our alpha build of VortexOS, simply run this command:
 ```
