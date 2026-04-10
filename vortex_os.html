@@ -2225,65 +2225,187 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Terminal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.min.css" />
   <style>
-    html,body{height:100%;margin:0;background:#050714;color:#f7fbff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+    html,body{height:100%;margin:0;background:#050714;color:#f7fbff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;}
     .wrap{height:100%;display:flex;flex-direction:column;padding:10px;gap:10px;box-sizing:border-box;}
-    .out{flex:1;min-height:0;overflow:auto;border-radius:14px;padding:12px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.08);white-space:pre-wrap;word-break:break-word;}
-    .bar{display:flex;gap:8px;align-items:center;}
-    .cwd{padding:10px 12px;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);font-size:12px;color:rgba(200,220,255,0.82);}
-    .inp{flex:1;min-width:0;border-radius:999px;border:1px solid rgba(255,255,255,0.10);background:rgba(6,8,22,0.92);color:#f7fbff;padding:10px 14px;outline:none;font:inherit;}
+    .bar{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+    .status{min-width:0;flex:1;padding:10px 12px;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);font-size:12px;color:rgba(200,220,255,0.82);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .btn{border:none;border-radius:999px;padding:10px 14px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.10);color:#f7fbff;cursor:pointer;font-weight:700;}
+    #termHost{flex:1;min-height:0;border-radius:14px;padding:10px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.08);overflow:hidden;}
+    .xterm-viewport::-webkit-scrollbar{width:8px;height:8px;}
+    .xterm-viewport::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18);border-radius:999px;}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div id="termOut" class="out"></div>
-    <form id="termForm" class="bar">
-      <div id="termCwd" class="cwd">~</div>
-      <input id="termInput" class="inp" type="text" placeholder="Enter a shell command" autocomplete="off" />
-      <button id="termClear" class="btn" type="button">Clear</button>
-    </form>
+    <div class="bar">
+      <div id="termStatus" class="status">Waiting for Vortex Node terminal…</div>
+      <button id="termReconnect" class="btn" type="button">Reconnect</button>
+    </div>
+    <div id="termHost"></div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.min.js"></script>
   <script>
     (function(){
-      const out = document.getElementById("termOut");
-      const form = document.getElementById("termForm");
-      const input = document.getElementById("termInput");
-      const cwdEl = document.getElementById("termCwd");
-      const clearBtn = document.getElementById("termClear");
+      const host = document.getElementById("termHost");
+      const statusEl = document.getElementById("termStatus");
+      const reconnectBtn = document.getElementById("termReconnect");
 
-      function append(text){
-        out.textContent += text || "";
-        out.scrollTop = out.scrollHeight;
+      let state = {
+        connected: false,
+        cwd: "~",
+        wsUrl: "",
+        nodeUrl: "",
+        reset: false
+      };
+
+      let ws = null;
+      let fitAddon = null;
+      let term = null;
+      let resizeTimer = null;
+
+      function bytesToBase64(text){
+        const bytes = new TextEncoder().encode(text);
+        let binary = "";
+        for (const b of bytes) binary += String.fromCharCode(b);
+        return btoa(binary);
       }
 
-      form.addEventListener("submit", (e)=>{
-        e.preventDefault();
-        const command = (input.value || "").trim();
-        if (!command) return;
-        append(`$ ${command}\n`);
-        parent.postMessage({ type: "vortex.terminal.command", command }, "*");
-        input.value = "";
-      });
+      function base64ToBytes(b64){
+        const raw = atob(b64 || "");
+        const out = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+        return out;
+      }
 
-      clearBtn.addEventListener("click", ()=>{
-        out.textContent = "";
+      function setStatus(text){
+        statusEl.textContent = text || "Vortex terminal";
+      }
+
+      function ensureTerminal(){
+        if (term) return;
+        term = new Terminal({
+          cursorBlink: true,
+          convertEol: false,
+          fontSize: 14,
+          scrollback: 5000,
+          theme: {
+            background: "#050714",
+            foreground: "#f7fbff",
+            cursor: "#f7fbff"
+          }
+        });
+        fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(host);
+        fitAddon.fit();
+
+        term.onData((data)=>{
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          ws.send(JSON.stringify({ type: "input", data_b64: bytesToBase64(data) }));
+        });
+      }
+
+      function sendResize(){
+        if (!term || !fitAddon || !ws || ws.readyState !== WebSocket.OPEN) return;
+        fitAddon.fit();
+        ws.send(JSON.stringify({
+          type: "resize",
+          cols: term.cols || 120,
+          rows: term.rows || 34
+        }));
+      }
+
+      function bootSocket(force = false){
+        if (!state.connected || !state.wsUrl){
+          setStatus("Connect Vortex Node in Settings to use Terminal.");
+          return;
+        }
+
+        ensureTerminal();
+
+        if (force && ws){
+          try{ ws.close(); } catch {}
+          ws = null;
+        }
+
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+        setStatus(`Connecting to ${state.nodeUrl || "Vortex Node"}…`);
+        ws = new WebSocket(state.wsUrl);
+
+        ws.addEventListener("open", ()=>{
+          setStatus(state.cwd ? `Connected · ${state.cwd}` : "Connected");
+          sendResize();
+        });
+
+        ws.addEventListener("message", (event)=>{
+          let msg = null;
+          try{ msg = JSON.parse(event.data); } catch {}
+          if (!msg || typeof msg !== "object") return;
+
+          if (msg.type === "ready"){
+            if (typeof msg.cwd === "string" && msg.cwd) state.cwd = msg.cwd;
+            setStatus(state.cwd ? `Connected · ${state.cwd}` : "Connected");
+            sendResize();
+            return;
+          }
+
+          if (msg.type === "output"){
+            if (msg.data_b64){
+              term.write(base64ToBytes(msg.data_b64));
+            }
+            return;
+          }
+
+          if (msg.type === "exit"){
+            setStatus("Terminal session ended.");
+            term.write("\r\n[terminal session ended]\r\n");
+            return;
+          }
+        });
+
+        ws.addEventListener("close", ()=>{
+          setStatus("Terminal disconnected.");
+        });
+
+        ws.addEventListener("error", ()=>{
+          setStatus("Terminal connection error.");
+        });
+      }
+
+      reconnectBtn.addEventListener("click", ()=>{
+        parent.postMessage({ type: "vortex.terminal.ready" }, "*");
+        bootSocket(true);
       });
 
       window.addEventListener("message", (e)=>{
         const msg = e.data;
         if (!msg || typeof msg !== "object") return;
         if (msg.type === "vortex.terminal.state"){
-          const state = msg.state || {};
-          cwdEl.textContent = state.cwd || "~";
-          if (state.reset) out.textContent = "";
-          if (state.output) append(state.output + (state.output.endsWith("\n") ? "" : "\n"));
-          input.disabled = !state.connected;
+          state = Object.assign({}, state, msg.state || {});
+          ensureTerminal();
+          if (msg.state && msg.state.reset){
+            term.reset();
+          }
+          if (msg.state && msg.state.output){
+            term.write(msg.state.output.replace(/\n/g, "\r\n"));
+          }
+          setStatus(state.connected ? `Connected · ${state.cwd || "~"}` : "Connect Vortex Node in Settings to use Terminal.");
+          bootSocket(false);
         }
       });
 
+      window.addEventListener("resize", ()=>{
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(sendResize, 100);
+      });
+
       window.addEventListener("DOMContentLoaded", ()=>{
+        ensureTerminal();
         parent.postMessage({ type: "vortex.terminal.ready" }, "*");
       });
     })();
@@ -2375,7 +2497,7 @@
     h2{margin:0 0 8px;font-size:14px;}
     .hint{font-size:12px;color:var(--muted);line-height:1.45;}
     label{display:block;font-size:12px;color:var(--muted);margin:10px 0 6px;}
-    input[type="text"], select{
+    input[type="password"], input[type="text"], select{
       width:100%;
       border-radius:999px;
       border:1px solid rgba(255,255,255,0.10);
@@ -2386,10 +2508,17 @@
       transition: box-shadow var(--t), border-color var(--t), background var(--t);
     }
 
-    input[type="text"]:focus, select:focus{
+    input[type="password"]:focus, input[type="text"]:focus, select:focus{
       border-color: rgba(var(--accent-rgb), 0.92);
       box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.55);
       background: rgba(6,8,22,0.96);
+    }
+
+    #networkNodeUrl,
+    #networkUsername,
+    #networkPassword,
+    #networkOtp{
+      width:90%;
     }
 
     select{
@@ -2566,7 +2695,11 @@
 
       <section id="tab-network" style="display:none;">
         <h2>Vortex Node</h2>
-        <div class="hint">Connect VortexOS to your self-hosted Vortex Node. Once connected, the built-in Browser and any <code>vortexnet:</code> hosted app URLs can use your personal node.</div>
+        <div class="hint">Connect VortexOS to your self-hosted Vortex Node. Status is shown first so the user can glance at it immediately. Live remote is the only browser path exposed here until translated and hybrid rendering are genuinely stable.</div>
+
+        <div class="list">
+          <div class="item" id="networkStatusCard"></div>
+        </div>
 
         <label for="networkNodeUrl">Node URL</label>
         <input id="networkNodeUrl" type="text" placeholder="https://example.com" />
@@ -2577,31 +2710,24 @@
         <label for="networkPassword">Password</label>
         <input id="networkPassword" type="password" placeholder="Node password" />
 
-        <label for="networkOtp">Authenticator code (only if 2FA is enabled)</label>
-        <input id="networkOtp" type="text" placeholder="123456" />
+        <label for="networkOtp">Authenticator code</label>
+        <input id="networkOtp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
 
         <div class="row">
           <button id="btnNetworkConnect" class="btn">Connect</button>
           <button id="btnNetworkDisconnect" class="btn danger">Disconnect</button>
-          <button id="btnNetworkRefresh" class="btn">Refresh status</button>
         </div>
 
         <div class="divider"></div>
 
-        <h2>Node routing and browser behavior</h2>
+        <h2>Node routing and live remote browser</h2>
+        <div class="hint">Broken browser modes are hidden on purpose in this build. The Browser now runs in live remote mode only, which is the stable path.</div>
 
         <label for="networkGlobalRoute">Node global route</label>
         <select id="networkGlobalRoute">
           <option value="direct">Direct</option>
           <option value="wireguard">WireGuard</option>
           <option value="tor">Tor</option>
-        </select>
-
-        <label for="networkBrowserMode">Node browser rendering mode</label>
-        <select id="networkBrowserMode">
-          <option value="hybrid">Hybrid</option>
-          <option value="translate">Translated</option>
-          <option value="stream">Live remote</option>
         </select>
 
         <label for="networkBrowserRoute">Built-in Browser route</label>
@@ -2612,23 +2738,8 @@
           <option value="tor">Tor</option>
         </select>
 
-        <div class="row" style="margin-top:10px;">
-          <label style="margin:0;display:flex;align-items:center;gap:10px;">
-            <input id="networkStripJunk" type="checkbox" />
-            Strip common junk and intrusive overlays
-          </label>
-        </div>
-
-        <div class="row" style="margin-top:10px;">
-          <label style="margin:0;display:flex;align-items:center;gap:10px;">
-            <input id="networkBlockPopups" type="checkbox" />
-            Block aggressive popup behavior
-          </label>
-        </div>
-
         <label for="networkScreenshotFps">Remote FPS</label>
         <select id="networkScreenshotFps">
-          <option value="15">15</option>
           <option value="30">30</option>
           <option value="45">45</option>
           <option value="60">60</option>
@@ -2641,6 +2752,13 @@
           <option value="85">High</option>
           <option value="90">Ultra</option>
         </select>
+
+        <div class="row" style="margin-top:10px;">
+          <label style="margin:0;display:flex;align-items:center;gap:10px;">
+            <input id="networkAutoUpdate" type="checkbox" />
+            Automatically check for node updates at startup
+          </label>
+        </div>
 
         <div class="row">
           <button id="btnNetworkSaveNodeSettings" class="btn">Save node settings</button>
@@ -2659,19 +2777,11 @@
         </div>
 
         <div class="divider"></div>
-        
-        <h2>Status</h2>
-        <div class="list">
-          <div class="item" id="networkStatusCard"></div>
-        </div>
-        
-        <div class="divider"></div>
-        
+
         <h2>Node maintenance</h2>
+        <div class="hint">Your encrypted Vortex OS blob already auto-syncs to the node whenever local settings are saved while connected, so manual upload/download buttons are removed here.</div>
         <div class="row">
-          <button id="btnNetworkUploadBlob" class="btn">Upload OS to node</button>
-          <button id="btnNetworkDownloadBlob" class="btn">Download OS from node</button>
-          <button id="btnNodeUpdate" class="btn">Update node</button>
+          <button id="btnNodeUpdate" class="btn">Check for update now</button>
           <button id="btnNodeReset" class="btn danger">Reset node state</button>
         </div>
       </section>
@@ -2725,6 +2835,7 @@
     const networkBlockPopups = document.getElementById("networkBlockPopups");
     const networkScreenshotFps = document.getElementById("networkScreenshotFps");
     const networkScreenshotQuality = document.getElementById("networkScreenshotQuality");
+    const networkAutoUpdate = document.getElementById("networkAutoUpdate");
 
     const networkTotpCard = document.getElementById("networkTotpCard");
     const networkStatusCard = document.getElementById("networkStatusCard");
@@ -2732,6 +2843,9 @@
     function showTab(key){
       tabs.forEach(b => b.classList.toggle("active", b.dataset.tab === key));
       Object.keys(sections).forEach(k => sections[k].style.display = (k === key ? "" : "none"));
+      if (key === "network" && state?.network?.connected){
+        parent.postMessage({ type: "vortex.settings.network.refresh" }, "*");
+      }
     }
 
     tabs.forEach(btn => btn.addEventListener("click", () => showTab(btn.dataset.tab)));
@@ -2776,29 +2890,38 @@
       if (searchEngine) searchEngine.value = (os.searchEngine || "duckduckgo");
       if (launchMode) launchMode.value = (os.launchMode === "external") ? "external" : "windowed";
 
-      const net = state.network || {};
+     const net = state.network || {};
+      const connected = !!net.connected;
+
       if (networkNodeUrl && document.activeElement !== networkNodeUrl) networkNodeUrl.value = net.nodeUrl || "";
       if (networkUsername && document.activeElement !== networkUsername) networkUsername.value = net.username || "";
-      if (networkBrowserMode) networkBrowserMode.value = net.browserMode || "hybrid";
+      if (networkPassword && connected) networkPassword.value = "";
+      if (networkOtp && connected) networkOtp.value = "";
       if (networkGlobalRoute) networkGlobalRoute.value = net.globalRouteMode || "direct";
       if (networkBrowserRoute) networkBrowserRoute.value = net.browserRouteMode || "default";
-      if (networkStripJunk) networkStripJunk.checked = net.stripCommonJunk !== false;
-      if (networkBlockPopups) networkBlockPopups.checked = net.blockAggressivePopups !== false;
-      if (networkScreenshotFps) networkScreenshotFps.value = String(net.screenshotFps || 4);
-      if (networkScreenshotQuality) networkScreenshotQuality.value = String(net.screenshotQuality || 85);
+      if (networkScreenshotFps) networkScreenshotFps.value = String(net.screenshotFps || 60);
+      if (networkScreenshotQuality) networkScreenshotQuality.value = String(net.screenshotQuality || 80);
+      if (networkAutoUpdate) networkAutoUpdate.checked = net.autoUpdatesEnabled !== false;
 
       if (networkStatusCard){
-        const connected = !!net.connected;
-        const top = connected ? "Connected" : "Not connected";
-        const bottom = net.currentBrowserUrl || net.nodeUrl || "No node configured yet";
-        const mode = net.browserMode || "hybrid";
-        const route = net.globalRouteMode || "direct";
+        const title = connected ? "Connected" : (net.status === "auth-expired" ? "Session expired" : "Not connected");
+        const primary = connected
+          ? (net.currentBrowserUrl || net.nodeUrl || "Connected")
+          : (net.nodeUrl || "No node configured yet");
+        const meta = [
+          net.status || "offline",
+          net.globalRouteMode || "direct",
+          "live remote",
+          `${net.screenshotFps || 60} FPS`,
+          `${net.screenshotQuality || 80}%`
+        ].join(" · ");
+
         networkStatusCard.innerHTML = `
           <div style="min-width:0;flex:1;">
-            <div class="itemName">${top}</div>
-            <div style="margin-top:4px;font-size:11px;color:var(--muted);white-space:normal;line-height:1.35;">${bottom}</div>
+            <div class="itemName">${title}</div>
+            <div style="margin-top:4px;font-size:11px;color:var(--muted);white-space:normal;line-height:1.35;">${primary}</div>
           </div>
-          <div style="font-size:11px;color:var(--muted);text-align:right;">${net.status || "offline"}<br>${route} · ${mode}</div>
+          <div style="font-size:11px;color:var(--muted);text-align:right;line-height:1.35;">${meta}</div>
         `;
       }
 
@@ -2813,6 +2936,11 @@
           <div style="font-size:11px;color:var(--muted);text-align:right;">authenticator</div>
         `;
       }
+
+      if (btnNetworkConnect) btnNetworkConnect.style.display = connected ? "none" : "";
+      if (btnNetworkDisconnect) btnNetworkDisconnect.style.display = connected ? "" : "none";
+      if (btnNetworkSetup2fa) btnNetworkSetup2fa.style.display = net.totpEnabled ? "none" : "";
+      if (btnNetworkDisable2fa) btnNetworkDisable2fa.style.display = net.totpEnabled ? "" : "none";
       
       // Profile
       username.value = (state.profile?.username || "").trim();
@@ -2919,13 +3047,8 @@
       postOsPref("launchMode", launchMode.value === "external" ? "external" : "windowed");
     });
 
-    networkBrowserMode && networkBrowserMode.addEventListener("change", ()=>{
-      parent.postMessage({ type: "vortex.settings.network.pref", key: "browserMode", value: networkBrowserMode.value }, "*");
-    });
-
     const btnNetworkConnect = document.getElementById("btnNetworkConnect");
     const btnNetworkDisconnect = document.getElementById("btnNetworkDisconnect");
-    const btnNetworkRefresh = document.getElementById("btnNetworkRefresh");
     const btnNetworkSaveNodeSettings = document.getElementById("btnNetworkSaveNodeSettings");
     const btnNetworkSetup2fa = document.getElementById("btnNetworkSetup2fa");
     const btnNetworkDisable2fa = document.getElementById("btnNetworkDisable2fa");
@@ -2948,20 +3071,15 @@
       parent.postMessage({ type: "vortex.settings.network.logout" }, "*");
     });
 
-    btnNetworkRefresh && btnNetworkRefresh.addEventListener("click", ()=>{
-      parent.postMessage({ type: "vortex.settings.network.refresh" }, "*");
-    });
-
     btnNetworkSaveNodeSettings && btnNetworkSaveNodeSettings.addEventListener("click", ()=>{
       parent.postMessage({
         type: "vortex.settings.network.saveNodeSettings",
         patch: {
           route_mode: networkGlobalRoute ? networkGlobalRoute.value : "direct",
-          browser_mode: networkBrowserMode ? networkBrowserMode.value : "hybrid",
-          strip_common_junk: networkStripJunk ? !!networkStripJunk.checked : true,
-          block_aggressive_popups: networkBlockPopups ? !!networkBlockPopups.checked : true,
-          screenshot_fps: networkScreenshotFps ? Number(networkScreenshotFps.value || 4) : 4,
-          screenshot_quality: networkScreenshotQuality ? Number(networkScreenshotQuality.value || 85) : 85
+          browser_mode: "stream",
+          screenshot_fps: networkScreenshotFps ? Number(networkScreenshotFps.value || 60) : 60,
+          screenshot_quality: networkScreenshotQuality ? Number(networkScreenshotQuality.value || 80) : 80,
+          auto_updates_enabled: networkAutoUpdate ? !!networkAutoUpdate.checked : true
         }
       }, "*");
     });
@@ -2987,6 +3105,10 @@
       if (msg.type === "vortex.settings.state"){
         state = msg.state || null;
         render();
+        return;
+      }
+      if (msg.type === "vortex.settings.showTab"){
+        showTab(msg.tab || "profile");
       }
     });
 
@@ -3116,7 +3238,7 @@
         calendar: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M8 3v4M16 3v4M4 9h16"/><path d="M8 12h.01M12 12h.01M16 12h.01"/><path d="M8 15h.01M12 15h.01M16 15h.01"/></svg>`,
         clock: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/></svg>`,
         settings: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.15.09a2 2 0 0 1-2-.03l-.16-.1a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.18a2 2 0 0 1-1 1.73l-.15.1a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.16-.1a2 2 0 0 1 2-.03l.15.09a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.15-.09a2 2 0 0 1 2 .03l.16.1a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.73v-.18a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.16.1a2 2 0 0 1-2 .03l-.15-.09a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`,
-        browser: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 9h18"/><path d="M9 3a16 16 0 0 0 0 18"/><path d="M15 3a16 16 0 0 1 0 18"/></svg>`,
+        browser: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M12 3v18"/><path d="M8.5 3.5c-1.9 2.2-3 5.3-3 8.5s1.1 6.3 3 8.5"/><path d="M15.5 3.5c1.9 2.2 3 5.3 3 8.5s-1.1 6.3-3 8.5"/></svg>`,
         chat: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14a4 4 0 0 1-4 4H9l-5 3V6a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v8Z"/><path d="M8 9h8M8 12h6"/></svg>`,
         vault: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V8a4 4 0 0 1 8 0v2"/><path d="M12 15v2"/></svg>`,
         terminal: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9l3 3-3 3"/><path d="M13 15h4"/></svg>`
@@ -3317,15 +3439,16 @@
               deviceId: "",
               status: "offline",
               lastConnectedAt: 0,
-              browserMode: "hybrid",
+              browserMode: "stream",
               globalRouteMode: "direct",
               browserRouteMode: "default",
               networkedAppsDefault: true,
               nodeSettings: {
                 stripCommonJunk: true,
                 blockAggressivePopups: true,
-                screenshotFps: 30,
-                screenshotQuality: 85,
+                screenshotFps: 60,
+                screenshotQuality: 80,
+                autoUpdatesEnabled: true,
                 totpEnabled: false,
                 pairedDevices: []
               }
@@ -3542,6 +3665,8 @@
       }
 
       let pendingNodeBootstrap = null;
+      let pendingSettingsTab = null;
+      let promptNodeOnboardingAfterBoot = false;
       
       const remoteBrowserWindows = {};
       const terminalStates = {};
@@ -3557,7 +3682,7 @@
             embedUrl: "",
             currentUrl: "",
             title: "",
-            mode: "hybrid",
+            mode: "stream",
             tabs: [],
             activeTabId: null,
             routeMode: "default",
@@ -3575,7 +3700,9 @@
             sessionId: "",
             cwd: "~",
             output: "",
-            connected: false
+            connected: false,
+            wsUrl: "",
+            nodeUrl: ""
           };
         }
         return terminalStates[windowId];
@@ -3591,15 +3718,16 @@
           deviceId: "",
           status: "offline",
           lastConnectedAt: 0,
-          browserMode: "hybrid",
+          browserMode: "stream",
           globalRouteMode: "direct",
           browserRouteMode: "default",
           networkedAppsDefault: true,
           nodeSettings: {
             stripCommonJunk: true,
             blockAggressivePopups: true,
-            screenshotFps: 30,
-            screenshotQuality: 85,
+            screenshotFps: 60,
+            screenshotQuality: 80,
+            autoUpdatesEnabled: true,
             totpEnabled: false,
             pairedDevices: []
           }
@@ -3675,12 +3803,13 @@
         const n = getNetworkCfg();
 
         n.globalRouteMode = data.route_mode || n.globalRouteMode || "direct";
-        n.browserMode = data.browser_mode || n.browserMode || "hybrid";
+        n.browserMode = "stream";
         n.nodeSettings = {
           stripCommonJunk: data.strip_common_junk !== false,
           blockAggressivePopups: data.block_aggressive_popups !== false,
-          screenshotFps: data.screenshot_fps || 4,
-          screenshotQuality: data.screenshot_quality || 85,
+          screenshotFps: data.screenshot_fps || 60,
+          screenshotQuality: data.screenshot_quality || 70,
+          autoUpdatesEnabled: data.auto_updates_enabled !== false,
           totpEnabled: !!data.totp_enabled,
           pairedDevices: data.paired_devices || []
         };
@@ -3727,12 +3856,13 @@
 
         if (data.node_settings){
           n.globalRouteMode = data.node_settings.route_mode || n.globalRouteMode || "direct";
-          n.browserMode = data.node_settings.browser_mode || n.browserMode || "hybrid";
+          n.browserMode = "stream";
           n.nodeSettings = {
             stripCommonJunk: data.node_settings.strip_common_junk !== false,
             blockAggressivePopups: data.node_settings.block_aggressive_popups !== false,
-            screenshotFps: data.node_settings.screenshot_fps || 30,
-            screenshotQuality: data.node_settings.screenshot_quality || 85,
+            screenshotFps: data.node_settings.screenshot_fps || 60,
+            screenshotQuality: data.node_settings.screenshot_quality || 80,
+            autoUpdatesEnabled: data.node_settings.auto_updates_enabled !== false,
             totpEnabled: !!data.node_settings.totp_enabled,
             pairedDevices: data.node_settings.paired_devices || []
           };
@@ -3769,12 +3899,13 @@
 
         if (data.node_settings){
           n.globalRouteMode = data.node_settings.route_mode || n.globalRouteMode || "direct";
-          n.browserMode = data.node_settings.browser_mode || n.browserMode || "hybrid";
+          n.browserMode = "stream";
           n.nodeSettings = {
             stripCommonJunk: data.node_settings.strip_common_junk !== false,
             blockAggressivePopups: data.node_settings.block_aggressive_popups !== false,
-            screenshotFps: data.node_settings.screenshot_fps || 4,
-            screenshotQuality: data.node_settings.screenshot_quality || 85,
+            screenshotFps: data.node_settings.screenshot_fps || 60,
+            screenshotQuality: data.node_settings.screenshot_quality || 80,
+            autoUpdatesEnabled: data.node_settings.auto_updates_enabled !== false,
             totpEnabled: !!data.node_settings.totp_enabled,
             pairedDevices: data.node_settings.paired_devices || []
           };
@@ -3830,6 +3961,8 @@
         syncTerminalIframe("vortex-terminal", {
           connected: false,
           cwd: "offline",
+          wsUrl: "",
+          nodeUrl: "",
           output: "Disconnected from Vortex Node.\n",
           reset: true
         });
@@ -3867,7 +4000,7 @@
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             url,
-            mode: mode || getNetworkCfg().browserMode || "hybrid",
+            mode: "stream",
             route_mode_override: routeModeOverride || "default"
           })
         });
@@ -3901,7 +4034,7 @@
       
       async function openRemoteUrlInBrowser(url, routeModeOverride = "default", windowId = "vortex-browser"){
         openApp("vortex-browser");
-        const data = await createRemoteSession(url, getNetworkCfg().browserMode || "hybrid", {
+        const data = await createRemoteSession(url, "stream", {
           closePreviousBrowserSession: true,
           routeModeOverride
         });
@@ -3911,7 +4044,7 @@
         state.embedUrl = data.embed_url || "";
         state.currentUrl = data.url || url;
         state.title = data.title || "Browser";
-        state.mode = data.effective_mode || data.mode || (getNetworkCfg().browserMode || "hybrid");
+        state.mode = data.effective_mode || data.mode || "stream";
         state.routeMode = data.route_mode || routeModeOverride || "default";
         state.tabs = Array.isArray(data.tabs) ? data.tabs : [];
         state.activeTabId = data.active_tab_id || null;
@@ -3957,7 +4090,7 @@
             embedUrl: state.embedUrl || "",
             currentUrl: state.currentUrl || "",
             title: state.title || "",
-            mode: state.mode || (getNetworkCfg().browserMode || "hybrid"),
+            mode: state.mode || "stream",
             routeMode: state.routeMode || getNetworkCfg().browserRouteMode || "default",
             tabs: state.tabs || [],
             activeTabId: state.activeTabId || null
@@ -3970,6 +4103,8 @@
           syncTerminalIframe(windowId, {
             connected: false,
             cwd: "offline",
+            wsUrl: "",
+            nodeUrl: "",
             output: "Connect Vortex Node in Settings to use Terminal.\n",
             reset: true
           });
@@ -3977,7 +4112,18 @@
         }
       
         const state = terminalWindowState(windowId);
-        if (state.sessionId) return state;
+        if (state.sessionId && state.wsUrl){
+          state.connected = true;
+          state.nodeUrl = getNetworkCfg().nodeUrl || "";
+          syncTerminalIframe(windowId, {
+            connected: true,
+            cwd: state.cwd || "~",
+            wsUrl: state.wsUrl,
+            nodeUrl: state.nodeUrl,
+            reset: true
+          });
+          return state;
+        }
       
         const res = await nodeFetch("/api/terminal/sessions", {
           method: "POST"
@@ -3987,10 +4133,13 @@
         state.sessionId = data.session_id || "";
         state.cwd = data.cwd || "~";
         state.connected = true;
+        state.wsUrl = data.ws_url || "";
+        state.nodeUrl = getNetworkCfg().nodeUrl || "";
         syncTerminalIframe(windowId, {
           connected: true,
           cwd: state.cwd,
-          output: "Connected to Vortex Node terminal.\n",
+          wsUrl: state.wsUrl,
+          nodeUrl: state.nodeUrl,
           reset: true
         });
         return state;
@@ -5409,7 +5558,7 @@
             username: net.username || "",
             connected: networkConnected(),
             status: net.status || "offline",
-            browserMode: net.browserMode || "hybrid",
+            browserMode: net.browserMode || "stream",
             globalRouteMode: net.globalRouteMode || "direct",
             browserRouteMode: net.browserRouteMode || "default",
             networkedAppsDefault: net.networkedAppsDefault !== false,
@@ -5417,8 +5566,9 @@
             currentBrowserUrl: browserWindowState("vortex-browser").currentUrl || "",
             stripCommonJunk: nodeSettings.stripCommonJunk !== false,
             blockAggressivePopups: nodeSettings.blockAggressivePopups !== false,
-            screenshotFps: nodeSettings.screenshotFps || 4,
-            screenshotQuality: nodeSettings.screenshotQuality || 85,
+            screenshotFps: nodeSettings.screenshotFps || 60,
+            screenshotQuality: nodeSettings.screenshotQuality || 80,
+            autoUpdatesEnabled: nodeSettings.autoUpdatesEnabled !== false,
             totpEnabled: !!nodeSettings.totpEnabled,
             pairedDevices: nodeSettings.pairedDevices || []
           },
@@ -5696,6 +5846,10 @@
 
         if (msg.type === "vortex.settings.ready"){
           syncSettingsIframe();
+          if (pendingSettingsTab){
+            postToSettings({ type: "vortex.settings.showTab", tab: pendingSettingsTab });
+            pendingSettingsTab = null;
+          }
           return;
         }
 
@@ -6809,6 +6963,7 @@
           const cfg = migrateDecryptedConfig(await decryptConfig(blob, pw));
           decryptedConfig = cfg;
           currentPassword = pw;
+          promptNodeOnboardingAfterBoot = true;
           await persistConfig();
           await bootIntoOS("Welcome back", "Loading apps and shell…");
         } catch {
@@ -6927,6 +7082,14 @@
             net.status = "auth-expired";
             net.accessToken = "";
             await persistConfig();
+          }
+        }
+
+        if (promptNodeOnboardingAfterBoot){
+          promptNodeOnboardingAfterBoot = false;
+          if (!net.nodeUrl){
+            pendingSettingsTab = "network";
+            openApp("settings");
           }
         }
 
