@@ -51,6 +51,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import tarfile
 import textwrap
 import time
 import traceback
@@ -125,6 +126,8 @@ SESSION_DIR = DEFAULT_DATA_DIR / "sessions"
 RUNTIME_DIR = DEFAULT_DATA_DIR / "runtime"
 WRAPPER_DIR = RUNTIME_DIR / "wrappers"
 WIREGUARD_DIR = DEFAULT_DATA_DIR / "wireguard"
+VENDOR_DIR = DEFAULT_DATA_DIR / "vendor"
+TERMINAL_VENDOR_DIR = VENDOR_DIR / "xterm"
 
 MAX_BODY_PREVIEW = 1024 * 1024
 
@@ -154,6 +157,20 @@ MAX_REMOTE_FPS = 60
 DEFAULT_XVFB_START_DISPLAY = 110
 DEFAULT_REMOTE_STUN_SERVERS = ["stun:stun.l.google.com:19302"]
 
+TERMINAL_VENDOR_ASSETS = {
+    "xterm.css": {
+        "url": "https://registry.npmjs.org/xterm/-/xterm-5.5.0.tgz",
+        "member": "package/css/xterm.css",
+    },
+    "xterm.js": {
+        "url": "https://registry.npmjs.org/xterm/-/xterm-5.5.0.tgz",
+        "member": "package/lib/xterm.js",
+    },
+    "xterm-addon-fit.js": {
+        "url": "https://registry.npmjs.org/xterm-addon-fit/-/xterm-addon-fit-0.10.0.tgz",
+        "member": "package/lib/xterm-addon-fit.js",
+    },
+}
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -167,6 +184,8 @@ def ensure_dirs() -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     WRAPPER_DIR.mkdir(parents=True, exist_ok=True)
     WIREGUARD_DIR.mkdir(parents=True, exist_ok=True)
+    VENDOR_DIR.mkdir(parents=True, exist_ok=True)
+    TERMINAL_VENDOR_DIR.mkdir(parents=True, exist_ok=True)
     SYNCED_BLOB_DIR.mkdir(parents=True, exist_ok=True)
     TERMINAL_STATE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -575,6 +594,7 @@ def bootstrap_runtime() -> None:
     if ensure_python_packages():
         restart_current_process("Python dependencies installed. Restarting Vortex Node...")
     ensure_playwright_browser()
+    ensure_terminal_vendor_assets()
 
 
 def current_frontend_path(cfg_raw: dict[str, t.Any] | None = None) -> pathlib.Path:
@@ -582,6 +602,41 @@ def current_frontend_path(cfg_raw: dict[str, t.Any] | None = None) -> pathlib.Pa
     ui_path = str((cfg_raw.get("frontend") or {}).get("ui_html_path") or DEFAULT_UI_HTML)
     return pathlib.Path(ui_path).expanduser().resolve()
 
+def _download_url_bytes(url: str) -> bytes:
+    import urllib.request
+
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"}
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return response.read()
+
+
+def ensure_terminal_vendor_assets(force: bool = False) -> None:
+    ensure_dirs()
+    tarball_cache: dict[str, bytes] = {}
+
+    for filename, spec in TERMINAL_VENDOR_ASSETS.items():
+        dest = TERMINAL_VENDOR_DIR / filename
+        if dest.exists() and dest.stat().st_size > 0 and not force:
+            continue
+
+        tarball_bytes = tarball_cache.get(spec["url"])
+        if tarball_bytes is None:
+            tarball_bytes = _download_url_bytes(spec["url"])
+            tarball_cache[spec["url"]] = tarball_bytes
+
+        with tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode="r:gz") as tar:
+            member = tar.extractfile(spec["member"])
+            if member is None:
+                raise RuntimeError(f"Unable to locate vendor asset {spec['member']} in {spec['url']}")
+            content = member.read()
+
+        tmp = dest.with_suffix(dest.suffix + ".tmp")
+        tmp.write_bytes(content)
+        os.chmod(tmp, 0o644)
+        tmp.replace(dest)
 
 def github_fetch_text(owner: str, repo: str, branch: str, remote_path: str) -> str:
     import urllib.request
@@ -1344,6 +1399,18 @@ class TerminalRuntime:
         await asyncio.to_thread(os.write, session.fd, data)
         session.updated_at = utc_now()
 
+    def _read_cwd(self, pid: int, fallback: str) -> str:
+        try:
+            return os.readlink(f"/proc/{int(pid)}/cwd")
+        except Exception:
+            return fallback
+
+    async def current_cwd(self, session_id: str) -> str:
+        session = self.get(session_id)
+        session.cwd = await asyncio.to_thread(self._read_cwd, session.pid, session.cwd)
+        session.updated_at = utc_now()
+        return session.cwd
+  
     async def exec(self, session_id: str, command: str) -> dict[str, t.Any]:
         session = self.get(session_id)
         command = str(command or "")
@@ -3212,7 +3279,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         totp_cfg = cfg.auth.setdefault("totp", {"enabled": False, "secret": "", "issuer": APP_NAME})
         return {
             "route_mode": cfg.egress.get("route_mode", "direct"),
-            "browser_mode": cfg.browser.get("mode", "hybrid"),
+            "browser_mode": cfg.browser.get("mode", "stream"),
             "strip_common_junk": bool(cfg.browser.get("strip_common_junk", True)),
             "block_aggressive_popups": bool(cfg.browser.get("block_aggressive_popups", True)),
             "screenshot_fps": int(cfg.browser.get("screenshot_fps", 60)),
@@ -3286,7 +3353,16 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         frontend_cfg = cfg.raw.get("frontend", {})
         ui_path = pathlib.Path(str(frontend_cfg.get("ui_html_path", ""))).expanduser()
         if frontend_cfg.get("serve_ui") and ui_path.exists():
-            return FileResponse(ui_path, media_type="text/html", headers={"cache-control": "no-store"})
+            return FileResponse(
+                ui_path,
+                media_type="text/html",
+                headers={
+                    "cache-control": "no-store",
+                    "content-security-policy": f"default-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:; frame-ancestors {frame_ancestors_policy};",
+                    "x-content-type-options": "nosniff",
+                    "referrer-policy": "no-referrer",
+                },
+            )
         return JSONResponse(
             {
                 "name": APP_NAME,
@@ -3294,7 +3370,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 "status": "ok",
                 "public_base_url": cfg.server.get("public_base_url"),
                 "egress": egress.describe(),
-                "browser_mode": cfg.browser.get("mode", "hybrid"),
+                "browser_mode": cfg.browser.get("mode", "stream"),
                 "features": {
                     "translation": True,
                     "remote_fallback": True,
@@ -3303,10 +3379,33 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 },
             },
             headers={
-                "content-security-policy": f"default-src 'self'; frame-ancestors {' '.join(cfg.server.get('frame_ancestors') or ['*'])}; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:;",
+                "content-security-policy": f"default-src 'self'; frame-ancestors {frame_ancestors_policy}; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:;",
+                "x-content-type-options": "nosniff",
+                "referrer-policy": "no-referrer",
             },
         )
 
+    @app.get("/assets/vendor/{asset_path:path}", include_in_schema=False)
+    async def vendor_asset(asset_path: str) -> Response:
+        base = VENDOR_DIR.resolve()
+        path = (base / asset_path).resolve()
+
+        if not path.is_file():
+            raise HTTPException(404, "Not found")
+        if base not in path.parents:
+            raise HTTPException(404, "Not found")
+
+        media_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={
+                "cache-control": "public, max-age=31536000, immutable",
+                "x-content-type-options": "nosniff",
+                "referrer-policy": "no-referrer",
+            },
+        )
+  
     @app.get("/api/info")
     async def api_info() -> JSONResponse:
         return JSONResponse(
@@ -3316,7 +3415,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 "status": "ok",
                 "public_base_url": cfg.server.get("public_base_url"),
                 "egress": egress.describe(),
-                "browser_mode": cfg.browser.get("mode", "hybrid"),
+                "browser_mode": cfg.browser.get("mode", "stream"),
                 "features": {
                     "translation": True,
                     "remote_fallback": True,
@@ -3545,7 +3644,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "username": claims.get("sub"),
             "server": {
                 "public_base_url": cfg.server.get("public_base_url"),
-                "mode": cfg.browser.get("mode", "hybrid"),
+                "mode": cfg.browser.get("mode", "stream"),
                 "egress": egress.describe(),
             },
             "node_settings": node_settings_payload(),
@@ -3589,13 +3688,6 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "cols": session.cols,
             "ws_url": f"{ws_base}/ws/terminal/{session.session_id}?ticket={urllib.parse.quote(ticket, safe='')}",
         })
-
-    @app.post("/api/terminal/sessions/{session_id}/exec")
-    async def exec_terminal_session(session_id: str, request: Request) -> JSONResponse:
-        await require_access(request)
-        payload = await request.json()
-        result = await terminals.exec(session_id, str(payload.get("command", "")))
-        return JSONResponse(result)
 
     @app.delete("/api/terminal/sessions/{session_id}")
     async def delete_terminal_session(session_id: str, request: Request) -> JSONResponse:
@@ -3678,8 +3770,9 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             raise HTTPException(401, "invalid viewer token")
         html = make_remote_shell(session.session_id, session.last_title or "Remote Web", session.effective_mode, ticket, session.viewer_token)
         return HTMLResponse(html, headers={
-            "content-security-policy": f"default-src 'self' blob: data:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:; frame-ancestors {' '.join(cfg.server.get('frame_ancestors') or ['*'])};",
-            "x-frame-options": "ALLOWALL",
+            "content-security-policy": f"default-src 'self' blob: data:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:; frame-ancestors {frame_ancestors_policy};",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
         })
 
     @app.get("/api/browser/sessions/{session_id}/page")
@@ -3692,7 +3785,9 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 raise HTTPException(401, "invalid viewer token")
         session = runtime.get(session_id)
         return HTMLResponse(session.last_render_html, headers={
-            "content-security-policy": f"default-src 'self' data: blob:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:; frame-ancestors {' '.join(cfg.server.get('frame_ancestors') or ['*'])};",
+            "content-security-policy": f"default-src 'self' data: blob:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:; frame-ancestors {frame_ancestors_policy};",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
         })
 
     @app.get("/api/browser/sessions/{session_id}/render")
@@ -3913,6 +4008,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         await websocket.accept()
 
         async def pump_output() -> None:
+            last_cwd = session.cwd
             while True:
                 chunk = await terminals.read_chunk(session_id, timeout=0.2)
                 if chunk is None:
@@ -3920,10 +4016,19 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                 if chunk == b"":
                     await websocket.send_json({"type": "exit"})
                     return
+
                 await websocket.send_json({
                     "type": "output",
                     "data_b64": base64.b64encode(chunk).decode("ascii"),
                 })
+
+                current_cwd = await terminals.current_cwd(session_id)
+                if current_cwd != last_cwd:
+                    last_cwd = current_cwd
+                    await websocket.send_json({
+                        "type": "cwd",
+                        "cwd": current_cwd,
+                    })
 
         pump_task = asyncio.create_task(pump_output())
         try:
@@ -3942,7 +4047,11 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                     if data_b64:
                         await terminals.write(session_id, base64.b64decode(data_b64))
                 elif action == "resize":
-                    session = await terminals.resize(session_id, int(payload.get("rows", session.rows)), int(payload.get("cols", session.cols)))
+                    session = await terminals.resize(
+                        session_id,
+                        int(payload.get("rows", session.rows)),
+                        int(payload.get("cols", session.cols)),
+                    )
                 elif action == "ping":
                     await websocket.send_json({"type": "pong", "time": utc_now()})
         except WebSocketDisconnect:
@@ -4245,7 +4354,7 @@ def run_server() -> int:
     print(f"Browser mode: {cfg.browser.get('mode')}")
     if cfg.raw.get("ops", {}).get("use_tmux"):
         print_tmux_hint()
-    uvicorn.run(app, host=host, port=port, proxy_headers=True, forwarded_allow_ips="*")
+    uvicorn.run(app, host=host, port=port, proxy_headers=True, forwarded_allow_ips="127.0.0.1,::1")
     return 0
 
 
