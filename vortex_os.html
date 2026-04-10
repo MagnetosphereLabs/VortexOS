@@ -1440,12 +1440,14 @@
         const resultEl = document.getElementById("result");
 
         const state = {
-          current: "0",
-          stored: null,
-          op: null,
-          resetInput: false,
-          exprTokens: [],
-          lastExpr: ""
+          connected: false,
+          nodeUrl: "",
+          embedUrl: "",
+          currentUrl: "",
+          title: "",
+          mode: "stream",
+          tabs: [],
+          activeTabId: null
         };
 
         function syncTheme(){
@@ -2225,14 +2227,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Terminal</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.5.0/css/xterm.min.css" />
   <style>
     html,body{height:100%;margin:0;background:#050714;color:#f7fbff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;}
     .wrap{height:100%;display:flex;flex-direction:column;padding:10px;gap:10px;box-sizing:border-box;}
     .bar{display:flex;align-items:center;justify-content:space-between;gap:10px;}
     .status{min-width:0;flex:1;padding:10px 12px;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);font-size:12px;color:rgba(200,220,255,0.82);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .btn{border:none;border-radius:999px;padding:10px 14px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.10);color:#f7fbff;cursor:pointer;font-weight:700;}
-    #termHost{flex:1;min-height:0;border-radius:14px;padding:10px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.08);overflow:hidden;}
+    #termHost{flex:1;min-height:0;border-radius:14px;padding:10px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.08);overflow:hidden;position:relative;}
+    #termBootMsg{position:absolute;inset:0;display:grid;place-items:center;padding:18px;text-align:center;font-size:12px;color:rgba(200,220,255,0.82);}
     .xterm-viewport::-webkit-scrollbar{width:8px;height:8px;}
     .xterm-viewport::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18);border-radius:999px;}
   </style>
@@ -2243,14 +2245,15 @@
       <div id="termStatus" class="status">Waiting for Vortex Node terminal…</div>
       <button id="termReconnect" class="btn" type="button">Reconnect</button>
     </div>
-    <div id="termHost"></div>
+    <div id="termHost">
+      <div id="termBootMsg">Waiting for Vortex Node terminal…</div>
+    </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.5.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.10.0/lib/xterm-addon-fit.min.js"></script>
   <script>
     (function(){
       const host = document.getElementById("termHost");
+      const bootMsg = document.getElementById("termBootMsg");
       const statusEl = document.getElementById("termStatus");
       const reconnectBtn = document.getElementById("termReconnect");
 
@@ -2266,6 +2269,77 @@
       let fitAddon = null;
       let term = null;
       let resizeTimer = null;
+      let keepAliveTimer = null;
+      let vendorPromise = null;
+
+      function setStatus(text){
+        statusEl.textContent = text || "Vortex terminal";
+      }
+
+      function assetBase(){
+        const base = String(state.nodeUrl || "").replace(/\/+$/, "");
+        return base ? `${base}/assets/vendor/xterm` : "/assets/vendor/xterm";
+      }
+
+      function loadCssOnce(href){
+        return new Promise((resolve, reject)=>{
+          const existing = document.querySelector(`link[data-vortex-xterm-css="${href}"]`);
+          if (existing){
+            resolve();
+            return;
+          }
+          const link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.href = href;
+          link.dataset.vortexXtermCss = href;
+          link.onload = ()=> resolve();
+          link.onerror = ()=> reject(new Error("Unable to load terminal CSS."));
+          document.head.appendChild(link);
+        });
+      }
+
+      function loadScriptOnce(src, testReady){
+        return new Promise((resolve, reject)=>{
+          try{
+            if (typeof testReady === "function" && testReady()){
+              resolve();
+              return;
+            }
+          } catch {}
+
+          const existing = document.querySelector(`script[data-vortex-xterm-js="${src}"]`);
+          if (existing){
+            existing.addEventListener("load", ()=> resolve(), { once: true });
+            existing.addEventListener("error", ()=> reject(new Error(`Unable to load ${src}`)), { once: true });
+            return;
+          }
+
+          const script = document.createElement("script");
+          script.src = src;
+          script.async = false;
+          script.dataset.vortexXtermJs = src;
+          script.onload = ()=> resolve();
+          script.onerror = ()=> reject(new Error(`Unable to load ${src}`));
+          document.head.appendChild(script);
+        });
+      }
+
+      function ensureVendorRuntime(){
+        if (window.Terminal && window.FitAddon && window.FitAddon.FitAddon){
+          return Promise.resolve();
+        }
+        if (vendorPromise) return vendorPromise;
+
+        const base = assetBase();
+        vendorPromise = loadCssOnce(`${base}/xterm.css`)
+          .then(()=> loadScriptOnce(`${base}/xterm.js`, ()=> !!window.Terminal))
+          .then(()=> loadScriptOnce(`${base}/xterm-addon-fit.js`, ()=> !!(window.FitAddon && window.FitAddon.FitAddon)));
+
+        return vendorPromise.catch((err)=>{
+          vendorPromise = null;
+          throw err;
+        });
+      }
 
       function bytesToBase64(text){
         const bytes = new TextEncoder().encode(text);
@@ -2281,13 +2355,14 @@
         return out;
       }
 
-      function setStatus(text){
-        statusEl.textContent = text || "Vortex terminal";
-      }
-
-      function ensureTerminal(){
+      async function ensureTerminal(){
         if (term) return;
-        term = new Terminal({
+
+        await ensureVendorRuntime();
+
+        if (bootMsg) bootMsg.remove();
+
+        term = new window.Terminal({
           cursorBlink: true,
           convertEol: false,
           fontSize: 14,
@@ -2298,7 +2373,8 @@
             cursor: "#f7fbff"
           }
         });
-        fitAddon = new FitAddon.FitAddon();
+
+        fitAddon = new window.FitAddon.FitAddon();
         term.loadAddon(fitAddon);
         term.open(host);
         fitAddon.fit();
@@ -2309,7 +2385,20 @@
         });
       }
 
-      function sendResize(){
+      function startKeepAlive(){
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = setInterval(()=>{
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          ws.send(JSON.stringify({ type: "ping" }));
+        }, 20000);
+      }
+
+      function stopKeepAlive(){
+        clearInterval(keepAliveTimer);
+        keepAliveTimer = null;
+      }
+
+      async function sendResize(){
         if (!term || !fitAddon || !ws || ws.readyState !== WebSocket.OPEN) return;
         fitAddon.fit();
         ws.send(JSON.stringify({
@@ -2319,13 +2408,18 @@
         }));
       }
 
-      function bootSocket(force = false){
+      async function bootSocket(force = false){
         if (!state.connected || !state.wsUrl){
+          if (ws){
+            try{ ws.close(); } catch {}
+            ws = null;
+          }
+          stopKeepAlive();
           setStatus("Connect Vortex Node in Settings to use Terminal.");
           return;
         }
 
-        ensureTerminal();
+        await ensureTerminal();
 
         if (force && ws){
           try{ ws.close(); } catch {}
@@ -2339,7 +2433,8 @@
 
         ws.addEventListener("open", ()=>{
           setStatus(state.cwd ? `Connected · ${state.cwd}` : "Connected");
-          sendResize();
+          startKeepAlive();
+          sendResize().catch(()=>{});
         });
 
         ws.addEventListener("message", (event)=>{
@@ -2350,25 +2445,38 @@
           if (msg.type === "ready"){
             if (typeof msg.cwd === "string" && msg.cwd) state.cwd = msg.cwd;
             setStatus(state.cwd ? `Connected · ${state.cwd}` : "Connected");
-            sendResize();
+            sendResize().catch(()=>{});
             return;
           }
 
           if (msg.type === "output"){
-            if (msg.data_b64){
+            if (msg.data_b64 && term){
               term.write(base64ToBytes(msg.data_b64));
+            }
+            return;
+          }
+
+          if (msg.type === "cwd"){
+            if (typeof msg.cwd === "string" && msg.cwd){
+              state.cwd = msg.cwd;
+              setStatus(`Connected · ${state.cwd}`);
             }
             return;
           }
 
           if (msg.type === "exit"){
             setStatus("Terminal session ended.");
-            term.write("\r\n[terminal session ended]\r\n");
+            if (term) term.write("\r\n[terminal session ended]\r\n");
+            return;
+          }
+
+          if (msg.type === "pong"){
             return;
           }
         });
 
         ws.addEventListener("close", ()=>{
+          stopKeepAlive();
           setStatus("Terminal disconnected.");
         });
 
@@ -2378,34 +2486,39 @@
       }
 
       reconnectBtn.addEventListener("click", ()=>{
-        parent.postMessage({ type: "vortex.terminal.ready" }, "*");
-        bootSocket(true);
+        parent.postMessage({ type: "vortex.terminal.reconnect" }, "*");
       });
 
-      window.addEventListener("message", (e)=>{
+      window.addEventListener("message", async (e)=>{
         const msg = e.data;
         if (!msg || typeof msg !== "object") return;
+
         if (msg.type === "vortex.terminal.state"){
           state = Object.assign({}, state, msg.state || {});
-          ensureTerminal();
-          if (msg.state && msg.state.reset){
-            term.reset();
+          try{
+            await ensureTerminal();
+            if (msg.state && msg.state.reset && term){
+              term.reset();
+            }
+            if (msg.state && msg.state.output && term){
+              term.write(msg.state.output.replace(/\n/g, "\r\n"));
+            }
+            setStatus(state.connected ? `Connected · ${state.cwd || "~"}` : "Connect Vortex Node in Settings to use Terminal.");
+            await bootSocket(false);
+          } catch (err){
+            setStatus(err && err.message ? err.message : "Unable to load terminal runtime.");
           }
-          if (msg.state && msg.state.output){
-            term.write(msg.state.output.replace(/\n/g, "\r\n"));
-          }
-          setStatus(state.connected ? `Connected · ${state.cwd || "~"}` : "Connect Vortex Node in Settings to use Terminal.");
-          bootSocket(false);
         }
       });
 
       window.addEventListener("resize", ()=>{
         clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(sendResize, 100);
+        resizeTimer = setTimeout(()=>{
+          sendResize().catch(()=>{});
+        }, 100);
       });
 
       window.addEventListener("DOMContentLoaded", ()=>{
-        ensureTerminal();
         parent.postMessage({ type: "vortex.terminal.ready" }, "*");
       });
     })();
@@ -2829,7 +2942,6 @@
     const networkOtp = document.getElementById("networkOtp");
 
     const networkGlobalRoute = document.getElementById("networkGlobalRoute");
-    const networkBrowserMode = document.getElementById("networkBrowserMode");
     const networkBrowserRoute = document.getElementById("networkBrowserRoute");
     const networkStripJunk = document.getElementById("networkStripJunk");
     const networkBlockPopups = document.getElementById("networkBlockPopups");
@@ -4098,7 +4210,7 @@
         }, "*");
       }
       
-      async function ensureTerminalSession(windowId = "vortex-terminal"){
+      async function ensureTerminalSession(windowId = "vortex-terminal", { forceNew = false } = {}){
         if (!networkConnected()) {
           syncTerminalIframe(windowId, {
             connected: false,
@@ -4110,9 +4222,19 @@
           });
           return null;
         }
-      
+
         const state = terminalWindowState(windowId);
-        if (state.sessionId && state.wsUrl){
+
+        if (forceNew && state.sessionId){
+          try{
+            await nodeFetch(`/api/terminal/sessions/${encodeURIComponent(state.sessionId)}`, { method: "DELETE" });
+          } catch {}
+          state.sessionId = "";
+          state.wsUrl = "";
+          state.cwd = "~";
+        }
+
+        if (!forceNew && state.sessionId && state.wsUrl){
           state.connected = true;
           state.nodeUrl = getNetworkCfg().nodeUrl || "";
           syncTerminalIframe(windowId, {
@@ -4124,12 +4246,12 @@
           });
           return state;
         }
-      
+
         const res = await nodeFetch("/api/terminal/sessions", {
           method: "POST"
         });
         const data = await res.json();
-      
+
         state.sessionId = data.session_id || "";
         state.cwd = data.cwd || "~";
         state.connected = true;
@@ -4154,25 +4276,6 @@
           type: "vortex.terminal.state",
           state
         }, "*");
-      }
-      
-      async function execTerminalCommand(command, windowId = "vortex-terminal"){
-        const state = await ensureTerminalSession(windowId);
-        if (!state) return;
-      
-        const res = await nodeFetch(`/api/terminal/sessions/${encodeURIComponent(state.sessionId)}/exec`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ command })
-        });
-        const data = await res.json();
-        state.cwd = data.cwd || state.cwd;
-        state.connected = true;
-        syncTerminalIframe(windowId, {
-          connected: true,
-          cwd: state.cwd,
-          output: data.output || ""
-        });
       }
       
       function tplHtml(id){
@@ -4412,7 +4515,7 @@
             try{
               const data = await createRemoteSession(
                 launch.url,
-                getNetworkCfg().browserMode || "hybrid",
+                getNetworkCfg().browserMode || "stream",
                 { routeModeOverride: launch.routeMode || "default" }
               );
 
@@ -4673,7 +4776,11 @@
         const browserState = (appId === "vortex-browser")
           ? browserWindowState("vortex-browser")
           : null;
-        
+
+        const terminalState = (appId === "vortex-terminal")
+          ? terminalWindowState("vortex-terminal")
+          : null;
+
         const remoteSessionId =
           win.querySelector(".appHost")?.dataset?.vortexSessionId ||
           (browserState ? browserState.sessionId : "");
@@ -4681,13 +4788,17 @@
         if (remoteSessionId && networkConnected()){
           nodeFetch(`/api/browser/sessions/${encodeURIComponent(remoteSessionId)}`, { method: "DELETE" }).catch(()=>{});
         }
+
+        if (terminalState && terminalState.sessionId && networkConnected()){
+          nodeFetch(`/api/terminal/sessions/${encodeURIComponent(terminalState.sessionId)}`, { method: "DELETE" }).catch(()=>{});
+        }
         
         if (browserState){
           browserState.sessionId = "";
           browserState.embedUrl = "";
           browserState.currentUrl = "";
           browserState.title = "";
-          browserState.mode = "hybrid";
+          browserState.mode = "stream";
           browserState.tabs = [];
           browserState.activeTabId = null;
           browserState.routeMode = "default";
@@ -4706,6 +4817,9 @@
           win.remove();
           openWindows.delete(appId);
           setIconActive(appId, false);
+          if (appId === "vortex-terminal"){
+            delete terminalStates["vortex-terminal"];
+          }
           if (focusedAppId === appId) focusedAppId = null;
         }, WIN_ANIM_MS);
       }
@@ -5792,26 +5906,32 @@
         if (msg.type === "vortex.terminal.ready"){
           const windowId = windowIdFromSource(event.source, "vortex-terminal") || "vortex-terminal";
           try{
-            await ensureTerminalSession(windowId);
+            await ensureTerminalSession(windowId, { forceNew: false });
           } catch (err){
             syncTerminalIframe(windowId, {
               connected: false,
               cwd: "offline",
+              wsUrl: "",
+              nodeUrl: "",
               output: (err && err.message ? err.message : "Unable to start terminal.") + "\n",
               reset: true
             });
           }
           return;
         }
-        
-        if (msg.type === "vortex.terminal.command"){
+
+        if (msg.type === "vortex.terminal.reconnect"){
           const windowId = windowIdFromSource(event.source, "vortex-terminal") || "vortex-terminal";
           try{
-            await execTerminalCommand(String(msg.command || ""), windowId);
+            await ensureTerminalSession(windowId, { forceNew: true });
           } catch (err){
             syncTerminalIframe(windowId, {
-              connected: true,
-              output: (err && err.message ? err.message : "Terminal execution failed.") + "\n"
+              connected: false,
+              cwd: "offline",
+              wsUrl: "",
+              nodeUrl: "",
+              output: (err && err.message ? err.message : "Unable to reconnect terminal.") + "\n",
+              reset: true
             });
           }
           return;
