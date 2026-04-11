@@ -59,7 +59,8 @@ import typing as t
 import urllib.parse
 import uuid
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import ssl
 
 # Third-party runtime deps
 try:
@@ -137,14 +138,23 @@ DEFAULT_UI_HTML_CANDIDATES = [
 ]
 DEFAULT_UI_HTML = next((p for p in DEFAULT_UI_HTML_CANDIDATES if p.exists()), DEFAULT_UI_HTML_CANDIDATES[0])
 
-DEFAULT_UPDATE_OWNER = "MagnetosphereLabs"
-DEFAULT_UPDATE_REPO = "VortexOS"
-DEFAULT_UPDATE_BRANCH = "main"
+DEFAULT_UPDATE_OWNER = os.environ.get("REPO_OWNER", "MagnetosphereLabs")
+DEFAULT_UPDATE_REPO = os.environ.get("REPO_NAME", "VortexOS")
+DEFAULT_UPDATE_BRANCH = os.environ.get("REPO_BRANCH", "main")
 DEFAULT_REMOTE_BACKEND_PATH = SCRIPT_PATH.name
 DEFAULT_REMOTE_FRONTEND_PATH = "vortex_os.html"
 DEFAULT_WG_INTERFACE = "vortexwg0"
 DEFAULT_WG_NAMESPACE = "vortexnode-worker"
 DEFAULT_TOR_SOCKS = "socks5://127.0.0.1:9050"
+
+def github_raw_url(owner: str, repo: str, branch: str, remote_path: str) -> str:
+    return (
+        "https://raw.githubusercontent.com/"
+        f"{urllib.parse.quote(owner, safe='')}/"
+        f"{urllib.parse.quote(repo, safe='')}/"
+        f"{urllib.parse.quote(branch, safe='')}/"
+        f"{urllib.parse.quote(remote_path, safe='/')}"
+    )
 
 PAIR_TOKEN_TTL_SECONDS = 60 * 60 * 24 * 180  # 180 days
 
@@ -159,15 +169,27 @@ DEFAULT_REMOTE_STUN_SERVERS = ["stun:stun.l.google.com:19302"]
 
 TERMINAL_VENDOR_ASSETS = {
     "xterm.css": {
-        "url": "https://registry.npmjs.org/xterm/-/xterm-5.5.0.tgz",
+        "cache_key": "vendor_xterm-5.5.0.tgz",
+        "urls": [
+            "https://registry.npmjs.org/xterm/-/xterm-5.5.0.tgz",
+            github_raw_url(DEFAULT_UPDATE_OWNER, DEFAULT_UPDATE_REPO, DEFAULT_UPDATE_BRANCH, "vendor_xterm-5.5.0.tgz"),
+        ],
         "member": "package/css/xterm.css",
     },
     "xterm.js": {
-        "url": "https://registry.npmjs.org/xterm/-/xterm-5.5.0.tgz",
+        "cache_key": "vendor_xterm-5.5.0.tgz",
+        "urls": [
+            "https://registry.npmjs.org/xterm/-/xterm-5.5.0.tgz",
+            github_raw_url(DEFAULT_UPDATE_OWNER, DEFAULT_UPDATE_REPO, DEFAULT_UPDATE_BRANCH, "vendor_xterm-5.5.0.tgz"),
+        ],
         "member": "package/lib/xterm.js",
     },
     "xterm-addon-fit.js": {
-        "url": "https://registry.npmjs.org/xterm-addon-fit/-/xterm-addon-fit-0.10.0.tgz",
+        "cache_key": "vendor_xterm-addon-fit-0.10.0.tgz",
+        "urls": [
+            "https://registry.npmjs.org/xterm-addon-fit/-/xterm-addon-fit-0.10.0.tgz",
+            github_raw_url(DEFAULT_UPDATE_OWNER, DEFAULT_UPDATE_REPO, DEFAULT_UPDATE_BRANCH, "vendor_xterm-addon-fit-0.10.0.tgz"),
+        ],
         "member": "package/lib/xterm-addon-fit.js",
     },
 }
@@ -452,6 +474,22 @@ def migrate_config(raw: dict[str, t.Any]) -> dict[str, t.Any]:
     raw["frontend"].setdefault("serve_ui", False)
     raw["frontend"].setdefault("ui_html_path", str(DEFAULT_UI_HTML))
 
+    raw.setdefault("auth", {})
+    raw["auth"].setdefault(
+        "system_username",
+        str(
+            raw["auth"].get("system_username")
+            or os.environ.get("SUDO_USER")
+            or os.environ.get("USER")
+            or raw["auth"].get("username")
+            or "root"
+        ),
+    )
+
+    raw.setdefault("files", {})
+    raw["files"].setdefault("default_path", "")
+    raw["files"].setdefault("allow_hidden", True)
+  
     raw.setdefault("ops", {})
 
     legacy_updates = raw["ops"].get("updates")
@@ -602,6 +640,7 @@ def current_frontend_path(cfg_raw: dict[str, t.Any] | None = None) -> pathlib.Pa
     ui_path = str((cfg_raw.get("frontend") or {}).get("ui_html_path") or DEFAULT_UI_HTML)
     return pathlib.Path(ui_path).expanduser().resolve()
 
+
 def _download_url_bytes(url: str) -> bytes:
     import urllib.request
 
@@ -613,6 +652,17 @@ def _download_url_bytes(url: str) -> bytes:
         return response.read()
 
 
+def _download_first_available_bytes(urls: list[str]) -> tuple[bytes, str]:
+    errors: list[str] = []
+    for url in urls:
+        try:
+            return _download_url_bytes(url), url
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+    raise RuntimeError(
+        "Unable to download vendor asset from any source:\n" + "\n".join(errors)
+    )
+
 def ensure_terminal_vendor_assets(force: bool = False) -> None:
     ensure_dirs()
     tarball_cache: dict[str, bytes] = {}
@@ -622,15 +672,20 @@ def ensure_terminal_vendor_assets(force: bool = False) -> None:
         if dest.exists() and dest.stat().st_size > 0 and not force:
             continue
 
-        tarball_bytes = tarball_cache.get(spec["url"])
+        cache_key = str(spec.get("cache_key") or filename)
+        tarball_bytes = tarball_cache.get(cache_key)
         if tarball_bytes is None:
-            tarball_bytes = _download_url_bytes(spec["url"])
-            tarball_cache[spec["url"]] = tarball_bytes
+            urls = list(spec.get("urls") or ([spec["url"]] if spec.get("url") else []))
+            if not urls:
+                raise RuntimeError(f"No download URLs configured for terminal vendor asset {filename}")
+            tarball_bytes, source_url = _download_first_available_bytes(urls)
+            print(f"Fetched terminal vendor asset for {filename} from {source_url}")
+            tarball_cache[cache_key] = tarball_bytes
 
         with tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode="r:gz") as tar:
             member = tar.extractfile(spec["member"])
             if member is None:
-                raise RuntimeError(f"Unable to locate vendor asset {spec['member']} in {spec['url']}")
+                raise RuntimeError(f"Unable to locate vendor asset {spec['member']} in cache bundle {cache_key}")
             content = member.read()
 
         tmp = dest.with_suffix(dest.suffix + ".tmp")
@@ -638,16 +693,11 @@ def ensure_terminal_vendor_assets(force: bool = False) -> None:
         os.chmod(tmp, 0o644)
         tmp.replace(dest)
 
+
 def github_fetch_text(owner: str, repo: str, branch: str, remote_path: str) -> str:
     import urllib.request
 
-    raw_url = (
-        f"https://raw.githubusercontent.com/"
-        f"{urllib.parse.quote(owner, safe='')}/"
-        f"{urllib.parse.quote(repo, safe='')}/"
-        f"{urllib.parse.quote(branch, safe='')}/"
-        f"{urllib.parse.quote(remote_path, safe='/')}"
-    )
+    raw_url = github_raw_url(owner, repo, branch, remote_path)
 
     request = urllib.request.Request(
         raw_url,
@@ -1068,6 +1118,187 @@ def guess_ssh_port() -> int:
         pass
     return 22
 
+def configured_system_username(cfg_raw: dict[str, t.Any]) -> str:
+    auth_cfg = cfg_raw.get("auth") or {}
+    candidates = [
+        auth_cfg.get("system_username"),
+        os.environ.get("SUDO_USER"),
+        os.environ.get("USER"),
+        auth_cfg.get("username"),
+        "root",
+    ]
+
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if not value:
+            continue
+        if sys.platform != "linux":
+            return value
+        try:
+            pwd.getpwnam(value)
+            return value
+        except Exception:
+            continue
+
+    return "root"
+
+
+def configured_system_home(cfg_raw: dict[str, t.Any]) -> pathlib.Path:
+    username = configured_system_username(cfg_raw)
+    try:
+        return pathlib.Path(pwd.getpwnam(username).pw_dir).expanduser().resolve()
+    except Exception:
+        return pathlib.Path("/root" if os.geteuid() == 0 else os.path.expanduser("~")).resolve()
+
+
+def resolve_node_path(raw_path: str | None, *, cfg_raw: dict[str, t.Any], allow_missing: bool = False) -> pathlib.Path:
+    raw = str(raw_path or "").strip()
+
+    if raw in {"", "~"}:
+        path = configured_system_home(cfg_raw)
+    else:
+        candidate = pathlib.Path(raw).expanduser()
+        path = candidate if candidate.is_absolute() else (configured_system_home(cfg_raw) / candidate)
+
+    resolved = path.resolve(strict=False)
+    if not allow_missing and not resolved.exists():
+        raise HTTPException(404, f"Path not found: {resolved}")
+    return resolved
+
+
+def file_entry_payload(path: pathlib.Path) -> dict[str, t.Any]:
+    st = path.lstat()
+    return {
+        "name": path.name or str(path),
+        "path": str(path),
+        "is_dir": path.is_dir(),
+        "is_file": path.is_file(),
+        "is_symlink": path.is_symlink(),
+        "size": st.st_size if path.is_file() else 0,
+        "mime_type": "inode/directory" if path.is_dir() else (mimetypes.guess_type(str(path))[0] or "application/octet-stream"),
+        "modified_at": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+    }
+
+
+def certificate_not_after(cert_path: pathlib.Path) -> datetime | None:
+    try:
+        info = ssl._ssl._test_decode_cert(str(cert_path))
+        raw = str(info.get("notAfter") or "").strip()
+        if not raw:
+            return None
+        return datetime.strptime(raw, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def letsencrypt_lineage_paths(domain: str) -> dict[str, pathlib.Path]:
+    live_dir = pathlib.Path("/etc/letsencrypt/live") / domain
+    return {
+        "live_dir": live_dir,
+        "fullchain": live_dir / "fullchain.pem",
+        "privkey": live_dir / "privkey.pem",
+    }
+
+
+def letsencrypt_lineage_reusable(domain: str, *, min_valid_seconds: int = 3600) -> bool:
+    paths = letsencrypt_lineage_paths(domain)
+    if not (paths["fullchain"].exists() and paths["privkey"].exists()):
+        return False
+
+    not_after = certificate_not_after(paths["fullchain"])
+    if not_after is None:
+        return True
+
+    return not_after > datetime.now(timezone.utc) + timedelta(seconds=min_valid_seconds)
+
+
+def build_nginx_vhost_config(domain: str, upstream: str, *, use_https: bool) -> str:
+    if not use_https:
+        return textwrap.dedent(f"""
+        map $http_upgrade $connection_upgrade {{
+            default upgrade;
+            ''      close;
+        }}
+
+        server {{
+            listen 80;
+            listen [::]:80;
+            server_name {domain};
+
+            client_max_body_size 64m;
+
+            location / {{
+                proxy_pass {upstream};
+                proxy_http_version 1.1;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header X-Forwarded-Host $host;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection $connection_upgrade;
+            }}
+        }}
+        """).strip() + "\n"
+
+    cert_paths = letsencrypt_lineage_paths(domain)
+    tls_lines: list[str] = []
+
+    options_ssl = pathlib.Path("/etc/letsencrypt/options-ssl-nginx.conf")
+    if options_ssl.exists():
+        tls_lines.append(f"include {options_ssl};")
+    else:
+        tls_lines.extend([
+            "ssl_session_cache shared:VortexSSL:10m;",
+            "ssl_session_timeout 1d;",
+            "ssl_protocols TLSv1.2 TLSv1.3;",
+            "ssl_prefer_server_ciphers off;",
+        ])
+
+    dhparam = pathlib.Path("/etc/letsencrypt/ssl-dhparams.pem")
+    if dhparam.exists():
+        tls_lines.append(f"ssl_dhparam {dhparam};")
+
+    tls_block = "\n        ".join(tls_lines)
+
+    return textwrap.dedent(f"""
+    map $http_upgrade $connection_upgrade {{
+        default upgrade;
+        ''      close;
+    }}
+
+    server {{
+        listen 80;
+        listen [::]:80;
+        server_name {domain};
+
+        client_max_body_size 64m;
+        return 301 https://$host$request_uri;
+    }}
+
+    server {{
+        listen 443 ssl http2;
+        listen [::]:443 ssl http2;
+        server_name {domain};
+
+        client_max_body_size 64m;
+        ssl_certificate {cert_paths["fullchain"]};
+        ssl_certificate_key {cert_paths["privkey"]};
+        {tls_block}
+
+        location / {{
+            proxy_pass {upstream};
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Forwarded-Host $host;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+        }}
+    }}
+    """).strip() + "\n"
 
 def ensure_public_firewall_access(domain: str) -> list[str]:
     notes: list[str] = []
@@ -1164,36 +1395,8 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
     upstream = f"http://{cfg.server.get('host', '127.0.0.1')}:{int(cfg.server.get('port', 8787))}"
     site_path = pathlib.Path("/etc/nginx/sites-available/vortex-node")
     enabled_path = pathlib.Path("/etc/nginx/sites-enabled/vortex-node")
-    letsencrypt_live_dir = pathlib.Path("/etc/letsencrypt/live") / domain
 
-    nginx_conf = textwrap.dedent(f"""
-    map $http_upgrade $connection_upgrade {{
-        default upgrade;
-        ''      close;
-    }}
-
-    server {{
-        listen 80;
-        listen [::]:80;
-        server_name {domain};
-
-        client_max_body_size 64m;
-
-        location / {{
-            proxy_pass {upstream};
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header X-Forwarded-Host $host;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection $connection_upgrade;
-        }}
-    }}
-    """).strip() + "\n"
-
-    site_path.write_text(nginx_conf, "utf-8")
+    site_path.write_text(build_nginx_vhost_config(domain, upstream, use_https=False), "utf-8")
     if enabled_path.exists() or enabled_path.is_symlink():
         enabled_path.unlink()
     enabled_path.symlink_to(site_path)
@@ -1228,36 +1431,43 @@ def configure_public_https(cfg: "NodeConfig", certbot_email: str) -> None:
     if not email:
         email = f"admin@{domain}"
 
-    certbot_cmd = [
-        "certbot",
-        "--nginx",
-        "--non-interactive",
-        "--agree-tos",
-        "--redirect",
-        "--email", email,
-        "--domain", domain,
-    ]
+    if letsencrypt_lineage_reusable(domain):
+        print(f"Reusing existing Let's Encrypt certificate for {domain}")
+    else:
+        certbot_cmd = [
+            "certbot",
+            "certonly",
+            "--nginx",
+            "--non-interactive",
+            "--agree-tos",
+            "--keep-until-expiring",
+            "--email", email,
+            "--domain", domain,
+        ]
 
-    try:
-        run_command(certbot_cmd, check=True)
-    except subprocess.CalledProcessError as exc:
-        notes_text = "\n".join(firewall_notes)
-        raise RuntimeError(
-            "Certbot failed while requesting/configuring HTTPS.\n"
-            "The installer already tried to open the local firewall for HTTP/HTTPS.\n"
-            "If it still timed out, the remaining likely causes are:\n"
-            "  - DNS is not pointing at this VPS yet\n"
-            "  - the VPS provider / control-panel firewall is still blocking port 80\n"
-            "  - another external network policy is blocking inbound HTTP\n"
-            f"\nFirewall actions attempted:\n{notes_text}\n"
-            f"\nstdout:\n{exc.stdout or ''}\n"
-            f"stderr:\n{exc.stderr or ''}"
-        ) from exc
+        try:
+            run_command(certbot_cmd, check=True)
+        except subprocess.CalledProcessError as exc:
+            notes_text = "\n".join(firewall_notes)
+            raise RuntimeError(
+                "Certbot failed while requesting/configuring HTTPS.\n"
+                "The installer already tried to open the local firewall for HTTP/HTTPS.\n"
+                "If it still timed out, the remaining likely causes are:\n"
+                "  - DNS is not pointing at this VPS yet\n"
+                "  - the VPS provider / control-panel firewall is still blocking port 80\n"
+                "  - another external network policy is blocking inbound HTTP\n"
+                f"\nFirewall actions attempted:\n{notes_text}\n"
+                f"\nstdout:\n{exc.stdout or ''}\n"
+                f"stderr:\n{exc.stderr or ''}"
+            ) from exc
 
-    if not letsencrypt_live_dir.exists():
+    cert_paths = letsencrypt_lineage_paths(domain)
+    if not cert_paths["fullchain"].exists() or not cert_paths["privkey"].exists():
         raise RuntimeError(
-            f"Certbot reported success but no certificate directory was created at {letsencrypt_live_dir}"
+            f"HTTPS setup expected certificate files at {cert_paths['live_dir']}, but they were not found."
         )
+
+    site_path.write_text(build_nginx_vhost_config(domain, upstream, use_https=True), "utf-8")
 
     try:
         run_command(["nginx", "-t"], check=True)
@@ -1295,21 +1505,21 @@ class TerminalRuntime:
             raise HTTPException(404, "Unknown terminal session")
         return session
 
-    def _resolve_user(self, username: str) -> tuple[int | None, int | None, str]:
+    def _resolve_user(self, username: str) -> tuple[int | None, int | None, str, str]:
         try:
             pw = pwd.getpwnam(username)
-            return pw.pw_uid, pw.pw_gid, pw.pw_dir
+            shell = pw.pw_shell or os.environ.get("SHELL") or "/bin/bash"
+            return pw.pw_uid, pw.pw_gid, pw.pw_dir, shell
         except Exception:
             home = os.path.expanduser("~")
-            return None, None, home
+            return None, None, home, os.environ.get("SHELL") or "/bin/bash"
 
     def _set_winsize(self, fd: int, rows: int, cols: int) -> None:
         packed = struct.pack("HHHH", max(2, int(rows)), max(8, int(cols)), 0, 0)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
 
     def _spawn_shell(self, username: str, rows: int = 34, cols: int = 120) -> tuple[int, int, str]:
-        uid, gid, home = self._resolve_user(username)
-        shell = os.environ.get("SHELL") or "/bin/bash"
+        uid, gid, home, shell = self._resolve_user(username)
         cwd = home or os.path.expanduser("~")
 
         master_fd, slave_fd = pty.openpty()
@@ -1319,9 +1529,13 @@ class TerminalRuntime:
         if pid == 0:
             try:
                 os.setsid()
+                with contextlib.suppress(Exception):
+                    fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+
                 os.dup2(slave_fd, 0)
                 os.dup2(slave_fd, 1)
                 os.dup2(slave_fd, 2)
+
                 with contextlib.suppress(Exception):
                     os.close(master_fd)
                 with contextlib.suppress(Exception):
@@ -1331,17 +1545,23 @@ class TerminalRuntime:
                 env.setdefault("TERM", "xterm-256color")
                 env.setdefault("COLORTERM", "truecolor")
                 env["HOME"] = cwd
+                env["PWD"] = cwd
                 env["SHELL"] = shell
                 env["USER"] = username
                 env["LOGNAME"] = username
                 env["LANG"] = env.get("LANG") or "C.UTF-8"
+                env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
 
                 os.chdir(cwd)
+
                 if os.geteuid() == 0 and gid is not None:
                     os.setgid(gid)
                 if os.geteuid() == 0 and uid is not None:
                     os.setuid(uid)
-                os.execvpe(shell, [shell, "-il"], env)
+
+                shell_name = os.path.basename(shell) or "bash"
+                argv = [shell_name, "-il"] if shell_name in {"bash", "zsh", "fish"} else [shell_name, "-i"]
+                os.execvpe(shell, argv, env)
             except Exception:
                 os._exit(1)
 
@@ -1566,14 +1786,28 @@ def ask_install_config() -> dict[str, t.Any]:
             certbot_email = prompt("Email for Certbot / Let's Encrypt", default=suggested_email)
 
     print("\nCreate the first node owner account.")
+    suggested_owner = os.environ.get("SUDO_USER") or os.environ.get("USER") or "owner"
     while True:
-        username = prompt("Node username", default=os.environ.get("SUDO_USER") or os.environ.get("USER") or "owner")
+        username = prompt("Node username", default=suggested_owner)
         if username.strip().lower() == "admin":
             print("Choose a non-default username. Do not use 'admin'.\n")
             continue
         if len(username.strip()) < 3:
             print("Use a longer username.\n")
             continue
+        break
+
+    while True:
+        system_username = prompt(
+            "Linux system username to expose through Terminal and Files",
+            default=os.environ.get("SUDO_USER") or os.environ.get("USER") or username,
+        )
+        if sys.platform == "linux":
+            try:
+                pwd.getpwnam(system_username)
+            except KeyError:
+                print("That Linux user does not exist on this machine.\n")
+                continue
         break
 
     while True:
@@ -1645,9 +1879,20 @@ def ask_install_config() -> dict[str, t.Any]:
         "backend_path": DEFAULT_REMOTE_BACKEND_PATH,
         "frontend_path": DEFAULT_REMOTE_FRONTEND_PATH,
     }
+    if updates_cfg["enabled"]:
+        use_default_update_repo = prompt_yes_no(
+            f"Use the official update repo {DEFAULT_UPDATE_OWNER}/{DEFAULT_UPDATE_REPO} on branch {DEFAULT_UPDATE_BRANCH}?",
+            default=True,
+        )
+        if not use_default_update_repo:
+            updates_cfg["owner"] = prompt("Update repo owner", default=updates_cfg["owner"])
+            updates_cfg["repo"] = prompt("Update repo name", default=updates_cfg["repo"])
+            updates_cfg["branch"] = prompt("Update repo branch or tag", default=updates_cfg["branch"])
+            updates_cfg["backend_path"] = prompt("Backend file path in repo", default=updates_cfg["backend_path"])
+            updates_cfg["frontend_path"] = prompt("Frontend file path in repo", default=updates_cfg["frontend_path"])
 
     cfg = {
-        "version": 4,
+        "version": 5,
         "created_at": utc_now(),
         "updated_at": utc_now(),
         "server": {
@@ -1665,6 +1910,7 @@ def ask_install_config() -> dict[str, t.Any]:
         },
         "auth": {
             "username": username,
+            "system_username": system_username,
             "password_hash": hash_password(password),
             "secret_key": secrets.token_urlsafe(48),
             "cookie_secret": secrets.token_urlsafe(48),
@@ -1717,6 +1963,7 @@ def ask_install_config() -> dict[str, t.Any]:
             "frontend_serving": True,
             "terminal": True,
             "node_blob_sync": True,
+            "file_browser": True,
         },
         "updates": updates_cfg,
         "ops": {
@@ -3246,7 +3493,7 @@ def make_remote_shell(session_id: str, title: str, render_mode: str, ticket: str
 """
 
 
-def create_app(cfg: NodeConfig) -> FastAPI:
+def create_app(cfg: NodeConfig) -> vvFastAPI:
     if FastAPI is None:
         raise RuntimeError("fastapi and uvicorn are required")
 
@@ -3277,6 +3524,8 @@ def create_app(cfg: NodeConfig) -> FastAPI:
   
     def node_settings_payload() -> dict[str, t.Any]:
         totp_cfg = cfg.auth.setdefault("totp", {"enabled": False, "secret": "", "issuer": APP_NAME})
+        updates_cfg = cfg.raw.get("updates") or {}
+
         return {
             "route_mode": cfg.egress.get("route_mode", "direct"),
             "browser_mode": cfg.browser.get("mode", "stream"),
@@ -3284,7 +3533,12 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "block_aggressive_popups": bool(cfg.browser.get("block_aggressive_popups", True)),
             "screenshot_fps": int(cfg.browser.get("screenshot_fps", 60)),
             "screenshot_quality": int(cfg.browser.get("screenshot_quality", 70)),
-            "auto_updates_enabled": bool((cfg.raw.get("updates") or {}).get("enabled", True)),
+            "auto_updates_enabled": bool(updates_cfg.get("enabled", True)),
+            "update_owner": str(updates_cfg.get("owner") or DEFAULT_UPDATE_OWNER),
+            "update_repo": str(updates_cfg.get("repo") or DEFAULT_UPDATE_REPO),
+            "update_branch": str(updates_cfg.get("branch") or DEFAULT_UPDATE_BRANCH),
+            "update_backend_path": str(updates_cfg.get("backend_path") or DEFAULT_REMOTE_BACKEND_PATH),
+            "update_frontend_path": str(updates_cfg.get("frontend_path") or DEFAULT_REMOTE_FRONTEND_PATH),
             "max_tabs_per_session": int(cfg.browser.get("max_tabs_per_session", MAX_TABS_PER_SESSION)),
             "remote_width_cap": int(cfg.browser.get("remote_width_cap", DEFAULT_REMOTE_WIDTH_CAP)),
             "remote_height_cap": int(cfg.browser.get("remote_height_cap", DEFAULT_REMOTE_HEIGHT_CAP)),
@@ -3303,6 +3557,9 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "available_routes": ["direct", "wireguard", "tor"],
             "blob_sync": True,
             "terminal": True,
+            "file_browser": True,
+            "system_username": configured_system_username(cfg.raw),
+            "files_home_path": str(configured_system_home(cfg.raw)),
         }
 
     @app.on_event("startup")
@@ -3376,6 +3633,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                     "remote_fallback": True,
                     "terminal": True,
                     "blob_sync": True,
+                    "file_browser": True,
                 },
             },
             headers={
@@ -3421,6 +3679,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
                     "remote_fallback": True,
                     "terminal": True,
                     "blob_sync": True,
+                    "file_browser": True,
                 },
             }
         )
@@ -3582,6 +3841,21 @@ def create_app(cfg: NodeConfig) -> FastAPI:
 
         if "auto_updates_enabled" in payload:
             cfg.raw.setdefault("updates", {})["enabled"] = bool(payload["auto_updates_enabled"])
+
+        if "update_owner" in payload:
+            cfg.raw.setdefault("updates", {})["owner"] = str(payload["update_owner"] or DEFAULT_UPDATE_OWNER).strip() or DEFAULT_UPDATE_OWNER
+
+        if "update_repo" in payload:
+            cfg.raw.setdefault("updates", {})["repo"] = str( payload["update_repo"] or DEFAULT_UPDATE_REPO).strip() or DEFAULT_UPDATE_REPO
+
+        if "update_branch" in payload:
+            cfg.raw.setdefault("updates", {})["branch"] = str(payload["update_branch"] or DEFAULT_UPDATE_BRANCH).strip() or DEFAULT_UPDATE_BRANCH
+
+        if "update_backend_path" in payload:
+            cfg.raw.setdefault("updates", {})["backend_path"] = str(payload["update_backend_path"] or DEFAULT_REMOTE_BACKEND_PATH).strip() or DEFAULT_REMOTE_BACKEND_PATH
+
+        if "update_frontend_path" in payload:
+            cfg.raw.setdefault("updates", {})["frontend_path"] = str(payload["update_frontend_path"] or DEFAULT_REMOTE_FRONTEND_PATH).strip() or DEFAULT_REMOTE_FRONTEND_PATH
       
         if "max_tabs_per_session" in payload:
             cfg.browser["max_tabs_per_session"] = max(1, min(32, int(payload["max_tabs_per_session"])))
@@ -3672,10 +3946,160 @@ def create_app(cfg: NodeConfig) -> FastAPI:
         write_private_text(path, body.decode("utf-8"))
         return JSONResponse({"ok": True, "path": str(path)})
 
+    @app.get("/api/files/list")
+    async def list_files(request: Request, path: str | None = None) -> JSONResponse:
+        await require_access(request)
+        target = resolve_node_path(path, cfg_raw=cfg.raw)
+        if not target.is_dir():
+            raise HTTPException(400, f"Not a directory: {target}")
+
+        entries: list[dict[str, t.Any]] = []
+        for child in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+            try:
+                entries.append(file_entry_payload(child))
+            except Exception as exc:
+                entries.append({
+                    "name": child.name,
+                    "path": str(child),
+                    "is_dir": False,
+                    "is_file": False,
+                    "is_symlink": child.is_symlink(),
+                    "size": 0,
+                    "mime_type": "application/octet-stream",
+                    "modified_at": "",
+                    "error": str(exc),
+                })
+
+        return JSONResponse({
+            "path": str(target),
+            "parent": str(target.parent) if target != target.parent else None,
+            "home": str(configured_system_home(cfg.raw)),
+            "entries": entries,
+        })
+
+    @app.get("/api/files/text")
+    async def read_file_text(request: Request, path: str, max_bytes: int = 262144) -> JSONResponse:
+        await require_access(request)
+        target = resolve_node_path(path, cfg_raw=cfg.raw)
+        if not target.is_file():
+            raise HTTPException(400, f"Not a file: {target}")
+
+        size = target.stat().st_size
+        with target.open("rb") as fh:
+            raw = fh.read(max_bytes + 1)
+
+        truncated = len(raw) > max_bytes or size > max_bytes
+        preview = raw[:max_bytes].decode("utf-8", errors="replace")
+
+        return JSONResponse({
+            "path": str(target),
+            "name": target.name,
+            "mime_type": mimetypes.guess_type(str(target))[0] or "text/plain",
+            "text": preview,
+            "truncated": truncated,
+            "size": size,
+        })
+
+    @app.get("/api/files/content")
+    async def read_file_content(request: Request, path: str, download: bool = False) -> Response:
+        await require_access(request)
+        target = resolve_node_path(path, cfg_raw=cfg.raw)
+        if not target.is_file():
+            raise HTTPException(400, f"Not a file: {target}")
+
+        media_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+        headers = {
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+        }
+        if download:
+            headers["content-disposition"] = f'attachment; filename="{target.name}"'
+
+        return FileResponse(target, media_type=media_type, headers=headers)
+
+    @app.post("/api/files/write")
+    async def write_file(request: Request) -> JSONResponse:
+        await require_access(request)
+        payload = await request.json()
+
+        target = resolve_node_path(payload.get("path"), cfg_raw=cfg.raw, allow_missing=True)
+        if target.exists() and target.is_dir():
+            raise HTTPException(400, f"Cannot overwrite directory: {target}")
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        body_b64 = payload.get("body_b64")
+        if body_b64 is not None:
+            try:
+                data = base64.b64decode(str(body_b64), validate=True)
+            except Exception as exc:
+                raise HTTPException(400, "body_b64 is not valid base64") from exc
+            target.write_bytes(data)
+        else:
+            target.write_text(str(payload.get("text", "")), "utf-8")
+
+        return JSONResponse({
+            "ok": True,
+            "entry": file_entry_payload(target),
+        })
+
+    @app.post("/api/files/mkdir")
+    async def make_directory(request: Request) -> JSONResponse:
+        await require_access(request)
+        payload = await request.json()
+
+        target = resolve_node_path(payload.get("path"), cfg_raw=cfg.raw, allow_missing=True)
+        target.mkdir(
+            parents=bool(payload.get("parents", True)),
+            exist_ok=bool(payload.get("exist_ok", True)),
+        )
+
+        return JSONResponse({
+            "ok": True,
+            "entry": file_entry_payload(target),
+        })
+
+    @app.post("/api/files/rename")
+    async def rename_path(request: Request) -> JSONResponse:
+        await require_access(request)
+        payload = await request.json()
+
+        old_path = resolve_node_path(payload.get("old_path"), cfg_raw=cfg.raw)
+        new_path = resolve_node_path(payload.get("new_path"), cfg_raw=cfg.raw, allow_missing=True)
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        old_path.rename(new_path)
+
+        return JSONResponse({
+            "ok": True,
+            "entry": file_entry_payload(new_path),
+        })
+
+    @app.post("/api/files/delete")
+    async def delete_path(request: Request) -> JSONResponse:
+        await require_access(request)
+        payload = await request.json()
+
+        target = resolve_node_path(payload.get("path"), cfg_raw=cfg.raw)
+        recursive = bool(payload.get("recursive", True))
+
+        if target.is_dir():
+            if recursive:
+                shutil.rmtree(target)
+            else:
+                target.rmdir()
+        else:
+            target.unlink()
+
+        return JSONResponse({
+            "ok": True,
+            "path": str(target),
+        })
+  
     @app.post("/api/terminal/sessions")
     async def create_terminal_session(request: Request) -> JSONResponse:
         claims = await require_access(request)
-        session = await terminals.create_session(str(claims.get("sub", cfg.auth.get("username", "owner"))))
+        system_username = configured_system_username(cfg.raw)
+        session = await terminals.create_session(system_username)
         ticket = auth.issue_terminal_ticket(str(claims.get("sub")), session_id=session.session_id)
         public_base = str(cfg.server.get("public_base_url", "")).rstrip("/")
         ws_base = public_base.replace("https://", "wss://").replace("http://", "ws://")
@@ -3686,6 +4110,7 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "created_at": session.created_at,
             "rows": session.rows,
             "cols": session.cols,
+            "username": system_username,
             "ws_url": f"{ws_base}/ws/terminal/{session.session_id}?ticket={urllib.parse.quote(ticket, safe='')}",
         })
 
@@ -4110,6 +4535,8 @@ def create_app(cfg: NodeConfig) -> FastAPI:
             "node_settings": node_settings_payload(),
             "terminal_sessions": len(terminals.sessions),
             "browser_sessions": len(runtime.sessions),
+            "system_username": configured_system_username(cfg.raw),
+            "files_home_path": str(configured_system_home(cfg.raw)),
         })
 
     return app
@@ -4215,9 +4642,11 @@ def get_install_guide() -> str:
     
         9) Open your node URL in a browser. If frontend serving is enabled, the node will serve the Vortex OS UI at /.
     
-        10) Unlock your Vortex OS profile, then connect Vortex OS to the node from Settings > Network.
+        10) Sign in with the node username and password you created during install.
     
-        11) To use microphone passthrough from the browser, serve the node over HTTPS. Browser microphone capture requires a secure context.
+        11) Vortex OS uses the node as its source of truth, so profile, theme, apps, files, and terminal access sync through the node.
+    
+        12) To use microphone passthrough from the browser, serve the node over HTTPS. Browser microphone capture requires a secure context.
         """
     ).strip() + "\n"
 
