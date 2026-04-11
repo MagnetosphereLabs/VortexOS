@@ -661,19 +661,115 @@
         visibility 0s;
     }
 
-    .gridHead { display:flex; align-items:center; justify-content: space-between; margin-bottom: 10px; }
+    .gridHead { display:flex; align-items:flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
     .gridTitle { font-weight: 750; font-size: 15px; }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      overflow: auto;
-      padding-bottom: 8px;
-    }
-    .gridItem { display:flex; flex-direction:column; align-items:center; gap: 6px; cursor:pointer; }
-    .gridName { font-size: 11px; color: var(--muted); text-align:center; }
+    .gridSub { margin-top: 4px; font-size: 12px; color: var(--muted); }
 
-with:
+    .gridSearch{
+      width:100%;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,0.08);
+      background:rgba(6,8,22,0.82);
+      color:var(--text);
+      padding:12px 14px;
+      outline:none;
+      margin-bottom:12px;
+      font-size:13px;
+    }
+    .gridSearch:focus{
+      border-color: rgba(var(--accent-rgb), 0.92);
+      box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.55);
+    }
+
+    .gridPinned{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      margin-bottom:12px;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap:12px;
+      overflow:auto;
+      padding-bottom:8px;
+    }
+
+    .gridItem{
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,0.08);
+      background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(0,0,0,0.22));
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:12px;
+      cursor:pointer;
+      min-height:118px;
+      transition: transform var(--t-fast), background var(--t-fast);
+    }
+    .gridItem:hover{
+      transform: translateY(-2px);
+      background: rgba(255,255,255,0.08);
+    }
+
+    .gridItemTop{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+    }
+
+    .gridItem .appIcon{
+      flex: 0 0 auto;
+      width: 40px;
+      height: 40px;
+    }
+
+    .gridMeta{ min-width:0; flex:1; }
+
+    .gridName {
+      font-size: 12px;
+      color: var(--text);
+      font-weight: 700;
+      text-align:left;
+    }
+
+    .gridKind {
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .gridActions{
+      display:flex;
+      align-items:center;
+      justify-content: space-between;
+      gap:8px;
+      margin-top:auto;
+    }
+
+    .gridPin{
+      border:none;
+      border-radius:999px;
+      padding:8px 12px;
+      font-size:11px;
+      font-weight:700;
+      cursor:pointer;
+      color:var(--text);
+      background:rgba(255,255,255,0.06);
+      border:1px solid rgba(255,255,255,0.10);
+    }
+    .gridPin.active{
+      color:#08102a;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border:none;
+    }
+
+    .appIcon.launcher{
+      background: linear-gradient(135deg, rgba(var(--accent-rgb),0.18), rgba(255,255,255,0.10));
+      border-color: rgba(var(--accent-rgb),0.30);
+    }
 
     .gridHead { display:flex; align-items:flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
     .gridTitle { font-weight: 750; font-size: 15px; }
@@ -2631,41 +2727,6 @@ with:
             setStatus("Terminal connection error.");
           }
         });
-
-          if (msg.type === "output"){
-            if (msg.data_b64 && term){
-              term.write(base64ToBytes(msg.data_b64));
-            }
-            return;
-          }
-
-          if (msg.type === "cwd"){
-            if (typeof msg.cwd === "string" && msg.cwd){
-              state.cwd = msg.cwd;
-              setStatus(`Connected · ${state.cwd}`);
-            }
-            return;
-          }
-
-          if (msg.type === "exit"){
-            setStatus("Terminal session ended.");
-            if (term) term.write("\r\n[terminal session ended]\r\n");
-            return;
-          }
-
-          if (msg.type === "pong"){
-            return;
-          }
-        });
-
-        ws.addEventListener("close", ()=>{
-          stopKeepAlive();
-          setStatus("Terminal disconnected.");
-        });
-
-        ws.addEventListener("error", ()=>{
-          setStatus("Terminal connection error.");
-        });
       }
 
       reconnectBtn.addEventListener("click", ()=>{
@@ -2772,13 +2833,18 @@ with:
       color:var(--text);
       background:rgba(255,255,255,0.06);
       border:1px solid rgba(255,255,255,0.10);
-      font-size:14px;
-      font-weight:700;
       display:grid;
       place-items:center;
+      transition:background 160ms ease, transform 160ms ease;
     }
     .iconBtn:hover{
       background:rgba(255,255,255,0.10);
+      transform:translateY(-1px);
+    }
+    .iconBtn svg{
+      width:18px;
+      height:18px;
+      display:block;
     }
     .pathWrap{
       flex:1;
@@ -2825,7 +2891,7 @@ with:
       padding:10px;
       display:flex;
       flex-direction:column;
-      gap:4px;
+      gap:6px;
     }
     .row{
       display:grid;
@@ -2837,9 +2903,11 @@ with:
       cursor:pointer;
       border:1px solid transparent;
       background:rgba(255,255,255,0.02);
+      transition:background 160ms ease, border-color 160ms ease, transform 160ms ease;
     }
     .row:hover{
       background:rgba(255,255,255,0.05);
+      transform:translateY(-1px);
     }
     .row.selected{
       background:rgba(var(--accent-rgb),0.12);
@@ -2847,6 +2915,27 @@ with:
       box-shadow:0 0 0 1px rgba(var(--accent-rgb),0.18);
     }
     .nameWrap{
+      min-width:0;
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+    .entryIcon{
+      width:34px;
+      height:34px;
+      border-radius:12px;
+      display:grid;
+      place-items:center;
+      background:rgba(255,255,255,0.05);
+      border:1px solid rgba(255,255,255,0.08);
+      flex:0 0 auto;
+    }
+    .entryIcon svg{
+      width:18px;
+      height:18px;
+      display:block;
+    }
+    .nameMeta{
       min-width:0;
     }
     .name{
@@ -2886,9 +2975,18 @@ with:
   <div class="shell">
     <div class="toolbar">
       <div class="toolGroup">
-        <button id="filesHome" class="iconBtn" type="button" title="Home">⌂</button>
-        <button id="filesUp" class="iconBtn" type="button" title="Up">↑</button>
-        <button id="filesRefresh" class="iconBtn" type="button" title="Refresh">↻</button>
+        <button id="filesUp" class="iconBtn" type="button" title="Up" aria-label="Up">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m15 18-6-6 6-6"/>
+          </svg>
+        </button>
+
+        <button id="filesNewWindow" class="iconBtn" type="button" title="New window" aria-label="New window">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="14" height="14" rx="2"/>
+            <path d="M17 8h4v12H9v-2"/>
+          </svg>
+        </button>
       </div>
 
       <div class="pathWrap">
@@ -2896,11 +2994,30 @@ with:
       </div>
 
       <div class="toolGroup">
-        <button id="filesNewFolder" class="iconBtn" type="button" title="New folder">＋</button>
-        <button id="filesRename" class="iconBtn" type="button" title="Rename">✎</button>
-        <button id="filesDelete" class="iconBtn" type="button" title="Delete">🗑</button>
-        <button id="filesDownload" class="iconBtn" type="button" title="Download">⇩</button>
-        <button id="filesUpload" class="iconBtn" type="button" title="Upload">⇧</button>
+        <button id="filesNewFolder" class="iconBtn" type="button" title="New folder" aria-label="New folder">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>
+            <path d="M12 11v6"/>
+            <path d="M9 14h6"/>
+          </svg>
+        </button>
+
+        <button id="filesRename" class="iconBtn" type="button" title="Rename" aria-label="Rename">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"/>
+          </svg>
+        </button>
+
+        <button id="filesDelete" class="iconBtn" type="button" title="Delete" aria-label="Delete">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18"/>
+            <path d="M8 6V4h8v2"/>
+            <path d="M19 6l-1 14H6L5 6"/>
+            <path d="M10 11v6"/>
+            <path d="M14 11v6"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -2911,30 +3028,26 @@ with:
     </div>
   </div>
 
-  <input id="filesUploadInput" type="file" multiple style="display:none;" />
-
   <script>
     (function(){
       const pathInput = document.getElementById("filesPath");
       const listEl = document.getElementById("filesList");
       const statusEl = document.getElementById("filesStatus");
-      const uploadInput = document.getElementById("filesUploadInput");
 
       const state = {
         connected: false,
         currentPath: "",
         homePath: "",
-        entries: []
+        entries: [],
+        selectedPath: ""
       };
-
-      let selectedPath = "";
 
       function send(action, payload = {}){
         parent.postMessage({ type: "vortex.files.action", action, ...payload }, "*");
       }
 
       function selectedEntry(){
-        return (state.entries || []).find(item => item.path === selectedPath) || null;
+        return (state.entries || []).find(item => item.path === state.selectedPath) || null;
       }
 
       function joinPath(base, name){
@@ -2966,6 +3079,29 @@ with:
         return `${size.toFixed(size >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
       }
 
+      function isTextish(entry){
+        const mime = String(entry?.mime_type || "");
+        const name = String(entry?.name || "");
+        return mime.startsWith("text/")
+          || /\.(txt|md|py|json|js|ts|html|css|sh|yaml|yml|xml|log|ini|conf|toml|env)$/i.test(name);
+      }
+
+      function entryIcon(entry){
+        if (entry.is_dir){
+          return `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/>
+            </svg>
+          `;
+        }
+        return `
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="rgba(240,245,255,0.92)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/>
+            <path d="M14 3v5h5"/>
+          </svg>
+        `;
+      }
+
       function render(){
         if (document.activeElement !== pathInput){
           pathInput.value = state.currentPath || state.homePath || "";
@@ -2978,10 +3114,9 @@ with:
         }
 
         statusEl.textContent = state.currentPath || state.homePath || "Files";
-
         listEl.innerHTML = "";
-        const entries = Array.isArray(state.entries) ? state.entries : [];
 
+        const entries = Array.isArray(state.entries) ? state.entries : [];
         if (!entries.length){
           listEl.innerHTML = `<div class="empty">This folder is empty.</div>`;
           return;
@@ -2989,23 +3124,37 @@ with:
 
         for (const entry of entries){
           const row = document.createElement("div");
-          row.className = "row" + (entry.path === selectedPath ? " selected" : "");
+          row.className = "row" + (entry.path === state.selectedPath ? " selected" : "");
 
           row.addEventListener("click", ()=>{
-            selectedPath = entry.path;
+            state.selectedPath = entry.path;
+            send("select", { path: entry.path });
             render();
           });
 
           row.addEventListener("dblclick", ()=>{
             if (entry.is_dir){
               send("open", { entry });
-            } else {
-              send("download", { path: entry.path });
+              return;
             }
+
+            if (isTextish(entry)){
+              send("openFile", { path: entry.path });
+              return;
+            }
+
+            send("download", { path: entry.path });
           });
 
           const nameWrap = document.createElement("div");
           nameWrap.className = "nameWrap";
+
+          const icon = document.createElement("div");
+          icon.className = "entryIcon";
+          icon.innerHTML = entryIcon(entry);
+
+          const nameMeta = document.createElement("div");
+          nameMeta.className = "nameMeta";
 
           const name = document.createElement("div");
           name.className = "name";
@@ -3023,8 +3172,11 @@ with:
           size.className = "size";
           size.textContent = entry.is_dir ? "—" : humanSize(entry.size);
 
-          nameWrap.appendChild(name);
-          nameWrap.appendChild(meta);
+          nameMeta.appendChild(name);
+          nameMeta.appendChild(meta);
+          nameWrap.appendChild(icon);
+          nameWrap.appendChild(nameMeta);
+
           row.appendChild(nameWrap);
           row.appendChild(kind);
           row.appendChild(size);
@@ -3032,16 +3184,12 @@ with:
         }
       }
 
-      document.getElementById("filesHome").addEventListener("click", ()=>{
-        send("go", { path: state.homePath || "~" });
-      });
-
       document.getElementById("filesUp").addEventListener("click", ()=>{
         send("up", { path: parentPath(state.currentPath || "/") });
       });
 
-      document.getElementById("filesRefresh").addEventListener("click", ()=>{
-        send("refresh");
+      document.getElementById("filesNewWindow").addEventListener("click", ()=>{
+        send("newWindow", { path: state.currentPath || state.homePath || "~" });
       });
 
       document.getElementById("filesNewFolder").addEventListener("click", ()=>{
@@ -3069,34 +3217,6 @@ with:
         send("delete", { path: entry.path });
       });
 
-      document.getElementById("filesDownload").addEventListener("click", ()=>{
-        const entry = selectedEntry();
-        if (!entry || entry.is_dir) return;
-        send("download", { path: entry.path });
-      });
-
-      document.getElementById("filesUpload").addEventListener("click", ()=>{
-        uploadInput.value = "";
-        uploadInput.click();
-      });
-
-      uploadInput.addEventListener("change", async ()=>{
-        const files = Array.from(uploadInput.files || []);
-        for (const file of files){
-          const dataUrl = await new Promise((resolve)=>{
-            const reader = new FileReader();
-            reader.onload = ()=> resolve(String(reader.result || ""));
-            reader.readAsDataURL(file);
-          });
-
-          const bodyB64 = String(dataUrl).split(",")[1] || "";
-          send("upload", {
-            path: joinPath(state.currentPath || state.homePath || "/", file.name),
-            bodyB64
-          });
-        }
-      });
-
       pathInput.addEventListener("keydown", (e)=>{
         if (e.key === "Enter"){
           e.preventDefault();
@@ -3107,15 +3227,214 @@ with:
       window.addEventListener("message", (e)=>{
         const msg = e.data;
         if (!msg || typeof msg !== "object") return;
+
         if (msg.type === "vortex.files.state"){
-          Object.assign(state, msg.state || {});
-          if (!selectedEntry()) selectedPath = "";
+          const incoming = msg.state || {};
+          state.connected = !!incoming.connected;
+          state.currentPath = String(incoming.currentPath || "");
+          state.homePath = String(incoming.homePath || "");
+          state.entries = Array.isArray(incoming.entries) ? incoming.entries : [];
+          state.selectedPath = String(incoming.selectedPath || state.selectedPath || "");
           render();
         }
       });
 
       window.addEventListener("DOMContentLoaded", ()=>{
         parent.postMessage({ type: "vortex.files.ready" }, "*");
+      });
+    })();
+  </script>
+</body>
+</html>
+  </template>
+
+  <template id="tpl-vortex-text-editor">
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Text Editor</title>
+  <style>
+    :root{
+      --text: rgba(250,252,255,0.95);
+      --muted: rgba(175,190,235,0.78);
+      --accent: #2D8CFF;
+      --accent2: #00B8FF;
+      --accent-rgb: 45,140,255;
+      --bg: radial-gradient(900px 700px at 0% 0%, rgba(255,255,255,0.05), rgba(6,8,22,0.96));
+      --shadow: 0 18px 40px rgba(0,0,0,0.35);
+    }
+    *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html,body{
+      height:100%;
+      margin:0;
+      overflow:hidden;
+      background:var(--bg);
+      color:var(--text);
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    }
+    .shell{
+      height:100%;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      padding:10px;
+    }
+    .toolbar{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px;
+      border-radius:18px;
+      background:linear-gradient(135deg, rgba(255,255,255,0.06), rgba(0,0,0,0.22));
+      border:1px solid rgba(255,255,255,0.08);
+      box-shadow:var(--shadow);
+      backdrop-filter:blur(18px);
+      -webkit-backdrop-filter:blur(18px);
+    }
+    .path{
+      flex:1;
+      min-width:0;
+      padding:10px 12px;
+      border-radius:14px;
+      background:rgba(6,8,22,0.92);
+      border:1px solid rgba(255,255,255,0.10);
+      font-size:12px;
+      color:var(--muted);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .btn{
+      border:none;
+      border-radius:999px;
+      padding:10px 14px;
+      background:rgba(255,255,255,0.08);
+      border:1px solid rgba(255,255,255,0.10);
+      color:var(--text);
+      cursor:pointer;
+      font-weight:700;
+    }
+    .btn.primary{
+      color:#08102a;
+      background:linear-gradient(135deg, var(--accent), var(--accent2));
+      border:none;
+    }
+    .status{
+      min-height:36px;
+      padding:9px 12px;
+      border-radius:14px;
+      background:rgba(255,255,255,0.05);
+      border:1px solid rgba(255,255,255,0.08);
+      color:var(--muted);
+      font-size:12px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    textarea{
+      flex:1;
+      min-height:0;
+      width:100%;
+      resize:none;
+      border:none;
+      outline:none;
+      border-radius:18px;
+      padding:16px;
+      background:rgba(5,7,20,0.94);
+      color:var(--text);
+      border:1px solid rgba(255,255,255,0.08);
+      box-shadow:var(--shadow);
+      font:inherit;
+      line-height:1.55;
+      tab-size:2;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="toolbar">
+      <div id="editorPath" class="path">No file open</div>
+      <button id="editorSave" class="btn primary" type="button">Save</button>
+    </div>
+
+    <div id="editorStatus" class="status">Connect Vortex Node to edit files.</div>
+    <textarea id="editorArea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+  </div>
+
+  <script>
+    (function(){
+      const pathEl = document.getElementById("editorPath");
+      const statusEl = document.getElementById("editorStatus");
+      const area = document.getElementById("editorArea");
+      const saveBtn = document.getElementById("editorSave");
+
+      let state = {
+        connected: false,
+        path: "",
+        name: "Untitled.txt",
+        text: "",
+        dirty: false,
+        saving: false
+      };
+
+      let suppressChange = false;
+
+      function render(){
+        pathEl.textContent = state.path || "No file open";
+        statusEl.textContent = state.saving
+          ? "Saving…"
+          : (state.connected
+              ? `${state.name || "Text file"}${state.dirty ? " • unsaved changes" : ""}`
+              : "Connect Vortex Node to edit files.");
+        area.disabled = !state.connected || !state.path;
+        saveBtn.disabled = !state.connected || !state.path || state.saving || !state.dirty;
+      }
+
+      function sendSave(){
+        if (!state.connected || !state.path || state.saving) return;
+        parent.postMessage({
+          type: "vortex.text-editor.save",
+          path: state.path,
+          text: area.value
+        }, "*");
+      }
+
+      area.addEventListener("input", ()=>{
+        if (suppressChange) return;
+        state.text = area.value;
+        state.dirty = true;
+        render();
+      });
+
+      saveBtn.addEventListener("click", sendSave);
+
+      window.addEventListener("keydown", (e)=>{
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s"){
+          e.preventDefault();
+          sendSave();
+        }
+      });
+
+      window.addEventListener("message", (e)=>{
+        const msg = e.data;
+        if (!msg || typeof msg !== "object") return;
+
+        if (msg.type === "vortex.text-editor.state"){
+          const incoming = msg.state || {};
+          state = Object.assign({}, state, incoming);
+
+          suppressChange = true;
+          area.value = String(state.text || "");
+          suppressChange = false;
+
+          render();
+        }
+      });
+
+      window.addEventListener("DOMContentLoaded", ()=>{
+        parent.postMessage({ type: "vortex.text-editor.ready" }, "*");
       });
     })();
   </script>
@@ -4018,6 +4337,7 @@ Replace with:
         chat: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14a4 4 0 0 1-4 4H9l-5 3V6a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v8Z"/><path d="M8 9h8M8 12h6"/></svg>`,
         vault: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V8a4 4 0 0 1 8 0v2"/><path d="M12 15v2"/></svg>`,
         terminal: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9l3 3-3 3"/><path d="M13 15h4"/></svg>`
+        textEditor: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#F2F5FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6"/><path d="M9 17h6"/><path d="M9 9h2"/></svg>`
       };
       
       const BUILTINS = [
@@ -4028,6 +4348,7 @@ Replace with:
         { id: "vortex-browser", name: "Browser",  icon: svgToDataUrl(BUILTIN_SVGS.browser),     tpl: "tpl-vortex-browser", editable: false, kind: "vortex", sandboxMode: "trusted" },
         { id: "vortex-files", name: "Files",      icon: svgToDataUrl(BUILTIN_SVGS.files),       tpl: "tpl-vortex-files", editable: false, kind: "vortex", sandboxMode: "trusted" },
         { id: "vortex-terminal", name: "Terminal", icon: svgToDataUrl(BUILTIN_SVGS.terminal),   tpl: "tpl-vortex-terminal", editable: false, kind: "vortex", sandboxMode: "trusted" },
+        { id: "vortex-text-editor", name: "Text Editor", icon: svgToDataUrl(BUILTIN_SVGS.textEditor), tpl: "tpl-vortex-text-editor", editable: false, kind: "system", sandboxMode: "trusted" },
         { id: "vortex-chat", name: "Vortex Chat", icon: svgToDataUrl(BUILTIN_SVGS.chat),        tpl: "tpl-vortex-chat", editable: false, kind: "vortex" },
         { id: "vortex-vault",name: "Vortex Vault",icon: svgToDataUrl(BUILTIN_SVGS.vault),       tpl: "tpl-vortex-vault",editable: false, kind: "vortex", sandboxMode: "trusted" }
       ].sort((a,b)=>a.name.localeCompare(b.name));
@@ -4440,6 +4761,7 @@ Replace with:
       const terminalStates = {};
 
       const fileBrowserStates = {};
+      const textEditorStates = {};
       
       function baseAppIdFromWindowId(windowId){
         return String(windowId || "").split("@")[0];
@@ -4619,7 +4941,73 @@ Replace with:
         document.body.removeChild(a);
         setTimeout(()=> URL.revokeObjectURL(url), 1000);
       }
-      
+
+      function textEditorWindowState(windowId){
+        if (!textEditorStates[windowId]){
+          textEditorStates[windowId] = {
+            path: "",
+            name: "Untitled.txt",
+            text: "",
+            connected: false,
+            dirty: false,
+            saving: false
+          };
+        }
+        return textEditorStates[windowId];
+      }
+
+      function isEditableTextEntry(entry){
+        const mime = String(entry?.mime_type || "");
+        const name = String(entry?.name || "");
+        return mime.startsWith("text/")
+          || /\.(txt|md|py|json|js|ts|html|css|sh|yaml|yml|xml|log|ini|conf|toml|env)$/i.test(name);
+      }
+
+      function syncTextEditorIframe(windowId){
+        const win = openWindows.get(windowId);
+        if (!win) return;
+
+        const frame = win.querySelector("iframe");
+        const state = textEditorWindowState(windowId);
+
+        frame?.contentWindow?.postMessage({
+          type: "vortex.text-editor.state",
+          state: {
+            connected: networkConnected(),
+            path: state.path || "",
+            name: state.name || "Untitled.txt",
+            text: state.text || "",
+            dirty: !!state.dirty,
+            saving: !!state.saving
+          }
+        }, "*");
+      }
+
+      async function openRemoteTextFileInEditor(path, sourceWindowId = "vortex-files"){
+        if (!networkConnected()) throw new Error("Connect Vortex Node first.");
+
+        const sourceState = fileWindowState(sourceWindowId);
+        const entry = sourceState.entries.find(item => item.path === path) || null;
+
+        const res = await nodeFetch(`/api/files/text?path=${encodeURIComponent(path)}`);
+        const data = await res.json();
+
+        const windowId = openAppWindow("vortex-text-editor", undefined, {
+          forceNew: true,
+          title: data.name || entry?.name || (String(path).split("/").pop() || "Text Editor")
+        });
+
+        const editorState = textEditorWindowState(windowId);
+        editorState.path = data.path || path;
+        editorState.name = data.name || entry?.name || "Untitled.txt";
+        editorState.text = data.text || "";
+        editorState.connected = true;
+        editorState.dirty = false;
+        editorState.saving = false;
+
+        syncTextEditorIframe(windowId);
+      }
+    
       function networkDefaults(){
         return {
           enabled: false,
@@ -5695,9 +6083,25 @@ Replace with:
         });
       }
 
+      function hasOpenWindowForApp(appId, exceptWindowId = ""){
+        for (const [windowId] of openWindows.entries()){
+          if (windowId === exceptWindowId) continue;
+          if (baseAppIdFromWindowId(windowId) === appId) return true;
+        }
+        return false;
+      }
+
+      function makeWindowId(baseAppId){
+        if (window.crypto && typeof window.crypto.randomUUID === "function"){
+          return `${baseAppId}@${window.crypto.randomUUID()}`;
+        }
+        return `${baseAppId}@${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      }
+
       function setIconFocused(appId, focused){
-        const i1 = dockCenter.querySelector(`[data-app="${appId}"]`);
-        const i2 = mobileIcons.querySelector(`[data-app="${appId}"]`);
+        const baseAppId = baseAppIdFromWindowId(appId);
+        const i1 = dockCenter.querySelector(`[data-app="${baseAppId}"]`);
+        const i2 = mobileIcons.querySelector(`[data-app="${baseAppId}"]`);
         if (i1) i1.classList.toggle("focused", focused);
         if (i2) i2.classList.toggle("focused", focused);
       }
@@ -5712,9 +6116,10 @@ Replace with:
       function dockWindow(appId){
         const win = openWindows.get(appId);
         if (!win) return;
+        const baseAppId = baseAppIdFromWindowId(appId);
         win.classList.add("minimized");
         win.classList.remove("open");
-        setIconActive(appId, true); // still running
+        setIconActive(baseAppId, true);
         setIconFocused(appId, false);
         if (focusedAppId === appId) focusedAppId = null;
       }
@@ -5729,8 +6134,9 @@ Replace with:
       }
 
       function setIconActive(appId, active){
-        const i1 = dockCenter.querySelector(`[data-app="${appId}"]`);
-        const i2 = mobileIcons.querySelector(`[data-app="${appId}"]`);
+        const baseAppId = baseAppIdFromWindowId(appId);
+        const i1 = dockCenter.querySelector(`[data-app="${baseAppId}"]`);
+        const i2 = mobileIcons.querySelector(`[data-app="${baseAppId}"]`);
         if (i1) i1.classList.toggle("active", active);
         if (i2) i2.classList.toggle("active", active);
       }
@@ -5739,22 +6145,24 @@ Replace with:
         const win = openWindows.get(appId);
         if (!win) return;
 
-        const browserState = (appId === "vortex-browser")
-          ? browserWindowState("vortex-browser")
+        const baseAppId = baseAppIdFromWindowId(appId);
+
+        const browserState = (baseAppId === "vortex-browser")
+          ? browserWindowState(appId)
           : null;
 
-        const terminalState = (appId === "vortex-terminal")
-          ? terminalWindowState("vortex-terminal")
+        const terminalState = (baseAppId === "vortex-terminal")
+          ? terminalWindowState(appId)
           : null;
 
-        const fileState = (appId === "vortex-files")
-          ? fileWindowState("vortex-files")
+        const fileState = (baseAppId === "vortex-files")
+          ? fileWindowState(appId)
           : null;
-        
+
         const remoteSessionId =
           win.querySelector(".appHost")?.dataset?.vortexSessionId ||
           (browserState ? browserState.sessionId : "");
-        
+
         if (remoteSessionId && networkConnected()){
           nodeFetch(`/api/browser/sessions/${encodeURIComponent(remoteSessionId)}`, { method: "DELETE" }).catch(()=>{});
         }
@@ -5762,7 +6170,7 @@ Replace with:
         if (terminalState && terminalState.sessionId && networkConnected()){
           nodeFetch(`/api/terminal/sessions/${encodeURIComponent(terminalState.sessionId)}`, { method: "DELETE" }).catch(()=>{});
         }
-        
+
         if (browserState){
           browserState.sessionId = "";
           browserState.embedUrl = "";
@@ -5777,12 +6185,22 @@ Replace with:
             try { browserState.ws.close(); } catch {}
             browserState.ws = null;
           }
+          delete remoteBrowserWindows[appId];
         }
 
         if (fileState){
-          clearFilePreview("vortex-files");
+          clearFilePreview(appId);
+          delete fileBrowserStates[appId];
         }
-        
+
+        if (baseAppId === "vortex-terminal"){
+          delete terminalStates[appId];
+        }
+
+        if (baseAppId === "vortex-text-editor"){
+          delete textEditorStates[appId];
+        }
+
         win.classList.remove("open", "minimized");
         win.classList.add("closing");
         setIconFocused(appId, false);
@@ -5790,19 +6208,12 @@ Replace with:
         setTimeout(() => {
           win.remove();
           openWindows.delete(appId);
-          setIconActive(appId, false);
-          if (appId === "vortex-terminal"){
-            delete terminalStates["vortex-terminal"];
-          }
+          setIconActive(baseAppId, hasOpenWindowForApp(baseAppId));
           if (focusedAppId === appId) focusedAppId = null;
-          if (appId === "vortex-files"){
-            clearFilePreview("vortex-files");
-            delete fileBrowserStates["vortex-files"];
-          }
         }, WIN_ANIM_MS);
       }
 
-      function createWindow(appMeta, preferredMode){
+      function createWindow(appMeta, preferredMode, windowId = appMeta.id, titleOverride = ""){
         const isMobile = document.body.classList.contains("mobile");
         const mode = resolvePreferredMode(appMeta.id, preferredMode);
         const launch = resolveLaunchSpec(appMeta);
@@ -5818,7 +6229,7 @@ Replace with:
 
         const win = document.createElement("div");
         win.className = "win";
-        win.dataset.app = appMeta.id;
+        win.dataset.app = windowId;
         win.style.zIndex = String(++zTop);
 
         if (!isMobile) {
@@ -5840,7 +6251,7 @@ Replace with:
 
         const title = document.createElement("div");
         title.className = "winTitle";
-        title.textContent = appMeta.name;
+        title.textContent = titleOverride || appMeta.name;
 
         left.appendChild(title);
 
@@ -5875,8 +6286,8 @@ Replace with:
         bar.appendChild(controls);
         win.appendChild(bar);
 
-        btnClose.addEventListener("click", (e)=>{ e.stopPropagation(); closeWindow(appMeta.id); });
-        btnDock.addEventListener("click", (e)=>{ e.stopPropagation(); dockWindow(appMeta.id); });
+        btnClose.addEventListener("click", (e)=>{ e.stopPropagation(); closeWindow(windowId); });
+        btnDock.addEventListener("click", (e)=>{ e.stopPropagation(); dockWindow(windowId); });
 
         btnFocus.addEventListener("click", (e)=>{
           e.stopPropagation();
@@ -5975,7 +6386,7 @@ Replace with:
 
           win.classList.add("dragging");
           bringToFront(win);
-          focusApp(appMeta.id);
+          focusApp(windowId);
 
           document.body.style.userSelect = "none";
           document.documentElement.style.cursor = "move";
@@ -5997,18 +6408,23 @@ Replace with:
 
         attachResizeHandles(win);
 
-        if (appMeta.id === "settings") {
-          const frame = host.querySelector("iframe");
+        const baseAppId = baseAppIdFromWindowId(windowId);
+        const frame = host.querySelector("iframe");
+
+        if (baseAppId === "settings") {
           frame?.addEventListener("load", () => syncSettingsIframe());
         }
 
-        if (appMeta.id === "vortex-files") {
-          const frame = host.querySelector("iframe");
-          frame?.addEventListener("load", () => syncFilesIframe(appMeta.id));
+        if (baseAppId === "vortex-files") {
+          frame?.addEventListener("load", () => syncFilesIframe(windowId));
         }
-        
+
+        if (baseAppId === "vortex-text-editor") {
+          frame?.addEventListener("load", () => syncTextEditorIframe(windowId));
+        }
+
         windowsLayer.appendChild(win);
-        openWindows.set(appMeta.id, win);
+        openWindows.set(windowId, win);
 
         requestAnimationFrame(() => {
           win.classList.add("open");
@@ -6017,30 +6433,41 @@ Replace with:
         return win;
       }
 
-      function openApp(appId, preferredMode){
+      function openAppWindow(appId, preferredMode, { forceNew = false, windowId = "", title = "" } = {}){
+        const baseAppId = baseAppIdFromWindowId(appId);
+
         if (document.body.classList.contains("mobile")){
           for (const [id] of openWindows.entries()){
-            if (id !== appId) closeWindow(id);
+            if (id !== windowId && id !== baseAppId) closeWindow(id);
           }
         }
 
-        const mode = resolvePreferredMode(appId, preferredMode);
-        let win = openWindows.get(appId);
-        if (win){
-          if (win.classList.contains("minimized")) restoreWindow(appId);
-          else { bringToFront(win); focusApp(appId); }
-          setIconActive(appId, true);
-          return;
+        const mode = resolvePreferredMode(baseAppId, preferredMode);
+        const finalWindowId = windowId || (forceNew ? makeWindowId(baseAppId) : baseAppId);
+
+        const existing = openWindows.get(finalWindowId);
+        if (existing){
+          if (existing.classList.contains("minimized")) restoreWindow(finalWindowId);
+          else { bringToFront(existing); focusApp(finalWindowId); }
+          setIconActive(baseAppId, true);
+          return finalWindowId;
         }
 
-        const appMeta = findAppMeta(appId);
-        if (!appMeta) return;
-        const made = createWindow(appMeta, mode);
-        if (!made) return;
+        const appMeta = findAppMeta(baseAppId);
+        if (!appMeta) return "";
 
-        focusApp(appId);
-        setIconActive(appId, true);
-        if (appId === "settings") setTimeout(syncSettingsIframe, 60);
+        const made = createWindow(appMeta, mode, finalWindowId, title);
+        if (!made) return "";
+
+        focusApp(finalWindowId);
+        setIconActive(baseAppId, true);
+        if (baseAppId === "settings") setTimeout(syncSettingsIframe, 60);
+
+        return finalWindowId;
+      }
+
+      function openApp(appId, preferredMode){
+        return openAppWindow(appId, preferredMode, { forceNew: false });
       }
 
       function findAppMeta(appId){
@@ -6171,16 +6598,16 @@ Replace with:
           if (!app) continue;
 
           const iconEl = makeDockAppIcon(app, ()=> openApp(app.id));
-          if (openWindows.has(app.id)) iconEl.classList.add("active");
-          if (focusedAppId === app.id) iconEl.classList.add("focused");
+          if (hasOpenWindowForApp(app.id)) iconEl.classList.add("active");
+          if (focusedAppId && baseAppIdFromWindowId(focusedAppId) === app.id) iconEl.classList.add("focused");
           dockCenter.appendChild(iconEl);
 
           const mobileEl = makeDockAppIcon(app, ()=>{
             hideGrid();
             openApp(app.id);
           });
-          if (openWindows.has(app.id)) mobileEl.classList.add("active");
-          if (focusedAppId === app.id) mobileEl.classList.add("focused");
+          if (hasOpenWindowForApp(app.id)) mobileEl.classList.add("active");
+          if (focusedAppId && baseAppIdFromWindowId(focusedAppId) === app.id) mobileEl.classList.add("focused");
           mobileIcons.appendChild(mobileEl);
 
           if (pinnedWrap){
@@ -6230,7 +6657,7 @@ Replace with:
 
           const openText = document.createElement("div");
           openText.className = "gridKind";
-          openText.textContent = openWindows.has(app.id) ? "Open now" : "Launch";
+          openText.textContent = hasOpenWindowForApp(app.id) ? "Open now" : "Launch";
 
           const pin = document.createElement("button");
           pin.type = "button";
@@ -7035,27 +7462,30 @@ Replace with:
           try{
             if (msg.action === "go"){
               await listRemoteFiles(String(msg.path || "").trim() || "~", windowId);
-            } else if (msg.action === "refresh"){
-              await listRemoteFiles(fileWindowState(windowId).currentPath || getNetworkCfg().nodeSettings.filesHomePath || "~", windowId);
             } else if (msg.action === "up"){
               await listRemoteFiles(String(msg.path || "/"), windowId);
+            } else if (msg.action === "newWindow"){
+              const newWindowId = openAppWindow("vortex-files", undefined, { forceNew: true });
+              await listRemoteFiles(
+                String(msg.path || fileWindowState(windowId).currentPath || getNetworkCfg().nodeSettings.filesHomePath || "~"),
+                newWindowId
+              );
             } else if (msg.action === "open"){
               const entry = msg.entry || {};
               if (entry.is_dir){
                 await listRemoteFiles(String(entry.path || ""), windowId);
+              } else if (isEditableTextEntry(entry)){
+                await openRemoteTextFileInEditor(String(entry.path || ""), windowId);
               } else {
-                await previewRemoteFile(String(entry.path || ""), windowId);
+                await downloadRemoteFile(String(entry.path || ""));
               }
+            } else if (msg.action === "openFile"){
+              await openRemoteTextFileInEditor(String(msg.path || ""), windowId);
             } else if (msg.action === "select"){
               const state = fileWindowState(windowId);
               state.selectedPath = String(msg.path || "");
               state.selectedEntry = state.entries.find(item => item.path === state.selectedPath) || null;
-              if (state.selectedEntry && !state.selectedEntry.is_dir){
-                await previewRemoteFile(state.selectedPath, windowId);
-              } else {
-                clearFilePreview(windowId);
-                syncFilesIframe(windowId);
-              }
+              syncFilesIframe(windowId);
             } else if (msg.action === "mkdir"){
               await nodeFetch("/api/files/mkdir", {
                 method: "POST",
@@ -7079,15 +7509,6 @@ Replace with:
               await listRemoteFiles(fileWindowState(windowId).currentPath, windowId);
             } else if (msg.action === "download"){
               await downloadRemoteFile(String(msg.path || ""));
-            } else if (msg.action === "upload"){
-              await nodeFetch("/api/files/write", {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ path: msg.path, body_b64: msg.bodyB64 })
-              });
-              await listRemoteFiles(fileWindowState(windowId).currentPath, windowId);
-            } else if (msg.action === "preview"){
-              await previewRemoteFile(String(msg.path || ""), windowId);
             }
           } catch (err){
             alert(err && err.message ? err.message : "File browser request failed.");
@@ -7095,6 +7516,42 @@ Replace with:
           return;
         }
 
+        if (msg.type === "vortex.text-editor.ready"){
+          const windowId = windowIdFromSource(event.source, "vortex-text-editor") || "vortex-text-editor";
+          syncTextEditorIframe(windowId);
+          return;
+        }
+
+        if (msg.type === "vortex.text-editor.save"){
+          const windowId = windowIdFromSource(event.source, "vortex-text-editor") || "vortex-text-editor";
+          const state = textEditorWindowState(windowId);
+
+          try{
+            state.saving = true;
+            syncTextEditorIframe(windowId);
+
+            const nextText = String(msg.text ?? state.text ?? "");
+
+            await nodeFetch("/api/files/write", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                path: state.path,
+                text: nextText
+              })
+            });
+
+            state.text = nextText;
+            state.dirty = false;
+          } catch (err){
+            alert(err && err.message ? err.message : "Unable to save the file.");
+          } finally {
+            state.saving = false;
+            syncTextEditorIframe(windowId);
+          }
+          return;
+        }
+        
         if (msg.type === "vortex.terminal.ready"){
           const windowId = windowIdFromSource(event.source, "vortex-terminal") || "vortex-terminal";
           try{
