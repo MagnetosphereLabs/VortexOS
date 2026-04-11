@@ -4485,128 +4485,128 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
         finally:
             await runtime.hub.disconnect(session_id, websocket)
 
-@app.websocket("/ws/terminal/{session_id}")
-async def terminal_ws(websocket: WebSocket, session_id: str, ticket: str) -> None:
-    try:
-        auth.require_terminal_ticket(ticket, session_id=session_id)
-    except Exception:
-        await websocket.close(code=1008)
-        return
+    @app.websocket("/ws/terminal/{session_id}")
+    async def terminal_ws(websocket: WebSocket, session_id: str, ticket: str) -> None:
+        try:
+            auth.require_terminal_ticket(ticket, session_id=session_id)
+        except Exception:
+            await websocket.close(code=1008)
+            return
 
-    await websocket.accept()
+        await websocket.accept()
 
-    try:
-        session = terminals.get(session_id)
-    except HTTPException:
-        with contextlib.suppress(Exception):
-            await websocket.send_json({"type": "exit"})
-        with contextlib.suppress(Exception):
-            await websocket.close(code=1000)
-        return
+        try:
+            session = terminals.get(session_id)
+        except HTTPException:
+            with contextlib.suppress(Exception):
+                await websocket.send_json({"type": "exit"})
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1000)
+            return
 
-    async def send_exit_and_close() -> None:
-        with contextlib.suppress(Exception):
-            await websocket.send_json({"type": "exit"})
-        with contextlib.suppress(Exception):
-            await websocket.close(code=1000)
+        async def send_exit_and_close() -> None:
+            with contextlib.suppress(Exception):
+                await websocket.send_json({"type": "exit"})
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1000)
 
-    async def pump_output() -> None:
-        last_cwd = session.cwd
-        while True:
-            try:
-                chunk = await terminals.read_chunk(session_id, timeout=0.2)
-            except HTTPException:
-                await send_exit_and_close()
-                return
-            except Exception:
-                with contextlib.suppress(Exception):
-                    await websocket.close(code=1011)
-                return
-
-            if chunk is None:
-                continue
-
-            if chunk == b"":
-                await send_exit_and_close()
-                return
-
-            try:
-                await websocket.send_json({
-                    "type": "output",
-                    "data_b64": base64.b64encode(chunk).decode("ascii"),
-                })
-            except Exception:
-                return
-
-            try:
-                current_cwd = await terminals.current_cwd(session_id)
-            except HTTPException:
-                current_cwd = last_cwd
-            except Exception:
-                current_cwd = last_cwd
-
-            if current_cwd != last_cwd:
-                last_cwd = current_cwd
-                with contextlib.suppress(Exception):
-                    await websocket.send_json({
-                        "type": "cwd",
-                        "cwd": current_cwd,
-                    })
-
-    pump_task = asyncio.create_task(pump_output())
-    try:
-        await websocket.send_json({
-            "type": "ready",
-            "cwd": session.cwd,
-            "rows": session.rows,
-            "cols": session.cols,
-        })
-
-        while True:
-            raw = await websocket.receive_text()
-            try:
-                payload = json.loads(raw) if raw else {}
-            except Exception:
-                continue
-
-            action = str(payload.get("type", "")).lower()
-
-            if action == "input":
-                data_b64 = str(payload.get("data_b64") or payload.get("data") or "")
-                if not data_b64:
-                    continue
+        async def pump_output() -> None:
+            last_cwd = session.cwd
+            while True:
                 try:
-                    decoded = base64.b64decode(data_b64)
+                    chunk = await terminals.read_chunk(session_id, timeout=0.2)
+                except HTTPException:
+                    await send_exit_and_close()
+                    return
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        await websocket.close(code=1011)
+                    return
+
+                if chunk is None:
+                    continue
+
+                if chunk == b"":
+                    await send_exit_and_close()
+                    return
+
+                try:
+                    await websocket.send_json({
+                        "type": "output",
+                        "data_b64": base64.b64encode(chunk).decode("ascii"),
+                    })
+                except Exception:
+                    return
+
+                try:
+                    current_cwd = await terminals.current_cwd(session_id)
+                except HTTPException:
+                    current_cwd = last_cwd
+                except Exception:
+                    current_cwd = last_cwd
+
+                if current_cwd != last_cwd:
+                    last_cwd = current_cwd
+                    with contextlib.suppress(Exception):
+                        await websocket.send_json({
+                            "type": "cwd",
+                            "cwd": current_cwd,
+                        })
+
+        pump_task = asyncio.create_task(pump_output())
+        try:
+            await websocket.send_json({
+                "type": "ready",
+                "cwd": session.cwd,
+                "rows": session.rows,
+                "cols": session.cols,
+            })
+
+            while True:
+                raw = await websocket.receive_text()
+                try:
+                    payload = json.loads(raw) if raw else {}
                 except Exception:
                     continue
-                try:
-                    await terminals.write(session_id, decoded)
-                except HTTPException:
-                    await send_exit_and_close()
-                    break
 
-            elif action == "resize":
-                try:
-                    session = await terminals.resize(
-                        session_id,
-                        int(payload.get("rows", session.rows)),
-                        int(payload.get("cols", session.cols)),
-                    )
-                except HTTPException:
-                    await send_exit_and_close()
-                    break
+                action = str(payload.get("type", "")).lower()
 
-            elif action == "ping":
-                await websocket.send_json({"type": "pong", "time": utc_now()})
+                if action == "input":
+                    data_b64 = str(payload.get("data_b64") or payload.get("data") or "")
+                    if not data_b64:
+                        continue
+                    try:
+                        decoded = base64.b64decode(data_b64)
+                    except Exception:
+                        continue
+                    try:
+                        await terminals.write(session_id, decoded)
+                    except HTTPException:
+                        await send_exit_and_close()
+                        break
 
-    except WebSocketDisconnect:
-        pass
-    finally:
-        pump_task.cancel()
-        with contextlib.suppress(Exception):
-            await pump_task
-        with contextlib.suppress(Exception):
-            await websocket.close(code=1000)
+                elif action == "resize":
+                    try:
+                        session = await terminals.resize(
+                            session_id,
+                            int(payload.get("rows", session.rows)),
+                            int(payload.get("cols", session.cols)),
+                        )
+                    except HTTPException:
+                        await send_exit_and_close()
+                        break
+
+                elif action == "ping":
+                    await websocket.send_json({"type": "pong", "time": utc_now()})
+
+        except WebSocketDisconnect:
+            pass
+        finally:
+            pump_task.cancel()
+            with contextlib.suppress(Exception):
+                await pump_task
+            with contextlib.suppress(Exception):
+                await websocket.close(code=1000)
   
     @app.websocket("/ws/frame/{session_id}")
     async def frame_ws(websocket: WebSocket, session_id: str, ticket: str) -> None:
