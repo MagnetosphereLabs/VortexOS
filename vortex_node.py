@@ -1770,7 +1770,7 @@ class TerminalRuntime:
                 raise RuntimeError(
                     f"Cannot launch a terminal as {login_username}: neither sudo nor runuser is available."
                 )
-            proc_cwd = home
+            proc_cwd = "/"
         else:
             raise RuntimeError(
                 f"Vortex Node is running as {current_username}, but the configured Linux account is {login_username}. "
