@@ -1912,43 +1912,39 @@ def ask_install_config() -> dict[str, t.Any]:
     run_on_boot = prompt_yes_no("Install a systemd service (Linux only, requires sudo)?", default=True)
     use_tmux = prompt_yes_no("Use tmux helpers for foreground/background management?", default=True)
 
-    update_repo_mode = prompt_choice(
-        "Which GitHub repo should Vortex use for updates and bundled terminal assets?",
-        [
-            ("official", f"Official repo ({DEFAULT_UPDATE_OWNER}/{DEFAULT_UPDATE_REPO}:{DEFAULT_UPDATE_BRANCH})"),
-            ("custom", "Custom owner/repo/branch"),
-        ],
-        default_key="official",
-    )
-    
+    updates_enabled = prompt_yes_no("Check GitHub for backend/frontend updates on startup?", default=True)
+
     update_owner = DEFAULT_UPDATE_OWNER
     update_repo = DEFAULT_UPDATE_REPO
     update_branch = DEFAULT_UPDATE_BRANCH
-    
-    if update_repo_mode == "custom":
-        update_owner = prompt("GitHub owner", default=DEFAULT_UPDATE_OWNER).strip() or DEFAULT_UPDATE_OWNER
-        update_repo = prompt("GitHub repo", default=DEFAULT_UPDATE_REPO).strip() or DEFAULT_UPDATE_REPO
-        update_branch = prompt("GitHub branch", default=DEFAULT_UPDATE_BRANCH).strip() or DEFAULT_UPDATE_BRANCH
-    
+    update_backend_path = DEFAULT_REMOTE_BACKEND_PATH
+    update_frontend_path = DEFAULT_REMOTE_FRONTEND_PATH
+
+    if updates_enabled:
+        update_repo_mode = prompt_choice(
+            "Which GitHub repo should Vortex use for updates and bundled terminal assets?",
+            [
+                ("official", f"Official repo ({DEFAULT_UPDATE_OWNER}/{DEFAULT_UPDATE_REPO}:{DEFAULT_UPDATE_BRANCH})"),
+                ("custom", "Custom owner/repo/branch"),
+            ],
+            default_key="official",
+        )
+
+        if update_repo_mode == "custom":
+            update_owner = prompt("GitHub owner", default=DEFAULT_UPDATE_OWNER).strip() or DEFAULT_UPDATE_OWNER
+            update_repo = prompt("GitHub repo", default=DEFAULT_UPDATE_REPO).strip() or DEFAULT_UPDATE_REPO
+            update_branch = prompt("GitHub branch or tag", default=DEFAULT_UPDATE_BRANCH).strip() or DEFAULT_UPDATE_BRANCH
+            update_backend_path = prompt("Backend file path in repo", default=DEFAULT_REMOTE_BACKEND_PATH).strip() or DEFAULT_REMOTE_BACKEND_PATH
+            update_frontend_path = prompt("Frontend file path in repo", default=DEFAULT_REMOTE_FRONTEND_PATH).strip() or DEFAULT_REMOTE_FRONTEND_PATH
+
     updates_cfg = {
-        "enabled": prompt_yes_no("Check GitHub for backend/frontend updates on startup?", default=True),
+        "enabled": updates_enabled,
         "owner": update_owner,
         "repo": update_repo,
         "branch": update_branch,
-        "backend_path": DEFAULT_REMOTE_BACKEND_PATH,
-        "frontend_path": DEFAULT_REMOTE_FRONTEND_PATH,
+        "backend_path": update_backend_path,
+        "frontend_path": update_frontend_path,
     }
-    if updates_cfg["enabled"]:
-        use_default_update_repo = prompt_yes_no(
-            f"Use the official update repo {DEFAULT_UPDATE_OWNER}/{DEFAULT_UPDATE_REPO} on branch {DEFAULT_UPDATE_BRANCH}?",
-            default=True,
-        )
-        if not use_default_update_repo:
-            updates_cfg["owner"] = prompt("Update repo owner", default=updates_cfg["owner"])
-            updates_cfg["repo"] = prompt("Update repo name", default=updates_cfg["repo"])
-            updates_cfg["branch"] = prompt("Update repo branch or tag", default=updates_cfg["branch"])
-            updates_cfg["backend_path"] = prompt("Backend file path in repo", default=updates_cfg["backend_path"])
-            updates_cfg["frontend_path"] = prompt("Frontend file path in repo", default=updates_cfg["frontend_path"])
 
     cfg = {
         "version": 5,
@@ -4011,9 +4007,18 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
         target = resolve_node_path(path, cfg_raw=cfg.raw)
         if not target.is_dir():
             raise HTTPException(400, f"Not a directory: {target}")
-
+    
+        try:
+            children = list(target.iterdir())
+        except PermissionError as exc:
+            raise HTTPException(
+                403,
+                f"Permission denied listing {target}. "
+                "Vortex Node must be running as root for full-host Files access."
+            ) from exc
+    
         entries: list[dict[str, t.Any]] = []
-        for child in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        for child in sorted(children, key=lambda p: (not p.is_dir(), p.name.lower())):
             try:
                 entries.append(file_entry_payload(child))
             except Exception as exc:
@@ -4028,7 +4033,7 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
                     "modified_at": "",
                     "error": str(exc),
                 })
-
+    
         return JSONResponse({
             "path": str(target),
             "parent": str(target.parent) if target != target.parent else None,
@@ -4480,70 +4485,128 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
         finally:
             await runtime.hub.disconnect(session_id, websocket)
 
-    @app.websocket("/ws/terminal/{session_id}")
-    async def terminal_ws(websocket: WebSocket, session_id: str, ticket: str) -> None:
-        try:
-            auth.require_terminal_ticket(ticket, session_id=session_id)
-        except Exception:
-            await websocket.close(code=1008)
-            return
+@app.websocket("/ws/terminal/{session_id}")
+async def terminal_ws(websocket: WebSocket, session_id: str, ticket: str) -> None:
+    try:
+        auth.require_terminal_ticket(ticket, session_id=session_id)
+    except Exception:
+        await websocket.close(code=1008)
+        return
 
+    await websocket.accept()
+
+    try:
         session = terminals.get(session_id)
-        await websocket.accept()
+    except HTTPException:
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "exit"})
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1000)
+        return
 
-        async def pump_output() -> None:
-            last_cwd = session.cwd
-            while True:
+    async def send_exit_and_close() -> None:
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "exit"})
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1000)
+
+    async def pump_output() -> None:
+        last_cwd = session.cwd
+        while True:
+            try:
                 chunk = await terminals.read_chunk(session_id, timeout=0.2)
-                if chunk is None:
-                    continue
-                if chunk == b"":
-                    await websocket.send_json({"type": "exit"})
-                    return
+            except HTTPException:
+                await send_exit_and_close()
+                return
+            except Exception:
+                with contextlib.suppress(Exception):
+                    await websocket.close(code=1011)
+                return
 
+            if chunk is None:
+                continue
+
+            if chunk == b"":
+                await send_exit_and_close()
+                return
+
+            try:
                 await websocket.send_json({
                     "type": "output",
                     "data_b64": base64.b64encode(chunk).decode("ascii"),
                 })
+            except Exception:
+                return
 
+            try:
                 current_cwd = await terminals.current_cwd(session_id)
-                if current_cwd != last_cwd:
-                    last_cwd = current_cwd
+            except HTTPException:
+                current_cwd = last_cwd
+            except Exception:
+                current_cwd = last_cwd
+
+            if current_cwd != last_cwd:
+                last_cwd = current_cwd
+                with contextlib.suppress(Exception):
                     await websocket.send_json({
                         "type": "cwd",
                         "cwd": current_cwd,
                     })
 
-        pump_task = asyncio.create_task(pump_output())
-        try:
-            await websocket.send_json({
-                "type": "ready",
-                "cwd": session.cwd,
-                "rows": session.rows,
-                "cols": session.cols,
-            })
-            while True:
-                raw = await websocket.receive_text()
+    pump_task = asyncio.create_task(pump_output())
+    try:
+        await websocket.send_json({
+            "type": "ready",
+            "cwd": session.cwd,
+            "rows": session.rows,
+            "cols": session.cols,
+        })
+
+        while True:
+            raw = await websocket.receive_text()
+            try:
                 payload = json.loads(raw) if raw else {}
-                action = str(payload.get("type", "")).lower()
-                if action == "input":
-                    data_b64 = str(payload.get("data_b64") or payload.get("data") or "")
-                    if data_b64:
-                        await terminals.write(session_id, base64.b64decode(data_b64))
-                elif action == "resize":
+            except Exception:
+                continue
+
+            action = str(payload.get("type", "")).lower()
+
+            if action == "input":
+                data_b64 = str(payload.get("data_b64") or payload.get("data") or "")
+                if not data_b64:
+                    continue
+                try:
+                    decoded = base64.b64decode(data_b64)
+                except Exception:
+                    continue
+                try:
+                    await terminals.write(session_id, decoded)
+                except HTTPException:
+                    await send_exit_and_close()
+                    break
+
+            elif action == "resize":
+                try:
                     session = await terminals.resize(
                         session_id,
                         int(payload.get("rows", session.rows)),
                         int(payload.get("cols", session.cols)),
                     )
-                elif action == "ping":
-                    await websocket.send_json({"type": "pong", "time": utc_now()})
-        except WebSocketDisconnect:
-            pass
-        finally:
-            pump_task.cancel()
-            with contextlib.suppress(Exception):
-                await pump_task
+                except HTTPException:
+                    await send_exit_and_close()
+                    break
+
+            elif action == "ping":
+                await websocket.send_json({"type": "pong", "time": utc_now()})
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        pump_task.cancel()
+        with contextlib.suppress(Exception):
+            await pump_task
+        with contextlib.suppress(Exception):
+            await websocket.close(code=1000)
   
     @app.websocket("/ws/frame/{session_id}")
     async def frame_ws(websocket: WebSocket, session_id: str, ticket: str) -> None:
@@ -4824,26 +4887,39 @@ def install_flow() -> int:
 def run_server() -> int:
     cfg_raw = migrate_config(read_json(CONFIG_PATH, {})) if CONFIG_PATH.exists() else {}
     apply_startup_updates(cfg_raw, restart_after_backend_update=True)
-    bootstrap_runtime(cfg_raw)
+    bootstrap_runtime(cfg_raw=cfg_raw)
 
     if not CONFIG_PATH.exists():
         print(f"Missing config: {CONFIG_PATH}. Run: python vortex_network.py install")
         return 1
 
     cfg_raw = migrate_config(read_json(CONFIG_PATH, {}))
-    write_json(CONFIG_PATH, cfg_raw)
+
+    if sys.platform == "linux" and os.geteuid() != 0:
+        print(
+            "Vortex Node must run as root for full-host Files and Terminal access. "
+            f"Current euid={os.geteuid()} configured_system_username={configured_system_username(cfg_raw)}"
+        )
+        return 1
+
     cfg = NodeConfig(cfg_raw)
-    app = create_app(cfg)
-    host = cfg.server.get("host", "127.0.0.1")
-    port = int(cfg.server.get("port", 8787))
-    print(f"\n{APP_NAME} {APP_VERSION}")
-    print(f"Binding on {host}:{port}")
+
+    print(f"{APP_NAME} {APP_VERSION}")
+    print(f"Binding on {cfg.server.get('host', '127.0.0.1')}:{cfg.server.get('port', 8787)}")
     print(f"Public base URL: {cfg.server.get('public_base_url')}")
-    print(f"Egress mode: {cfg.egress.get('route_mode')}")
-    print(f"Browser mode: {cfg.browser.get('mode')}")
-    if cfg.raw.get("ops", {}).get("use_tmux"):
-        print_tmux_hint()
-    uvicorn.run(app, host=host, port=port, proxy_headers=True, forwarded_allow_ips="127.0.0.1,::1")
+    print(f"Egress mode: {cfg.egress.get('route_mode', 'direct')}")
+    print(f"Browser mode: {cfg.browser.get('mode', 'stream')}")
+    print_tmux_hint()
+
+    app = create_app(cfg)
+    uvicorn.run(
+        app,
+        host=str(cfg.server.get("host", "127.0.0.1")),
+        port=int(cfg.server.get("port", 8787)),
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )
     return 0
 
 
