@@ -1207,10 +1207,10 @@ def build_system_user_command(cfg_raw: dict[str, t.Any], argv: list[str]) -> lis
         return argv
 
     if os.geteuid() == 0:
-        if which("sudo") is not None:
-            return ["sudo", "-n", "-u", username, "-H", "--", *argv]
         if which("runuser") is not None:
             return ["runuser", "-u", username, "--", *argv]
+        if which("sudo") is not None:
+            return ["sudo", "-n", "-u", username, "-H", "--", *argv]
 
     raise RuntimeError(
         f"Unable to assume Linux user {username}. "
@@ -1762,15 +1762,15 @@ class TerminalRuntime:
             cmd = shell_argv
             proc_cwd = home
         elif os.geteuid() == 0:
-            if which("sudo") is not None:
-                cmd = ["sudo", "-n", "-u", login_username, "-H", "--", *shell_argv]
-            elif which("runuser") is not None:
+            if which("runuser") is not None:
                 cmd = ["runuser", "-u", login_username, "--", *shell_argv]
+            elif which("sudo") is not None:
+                cmd = ["sudo", "-n", "-u", login_username, "-H", "--", *shell_argv]
             else:
                 raise RuntimeError(
                     f"Cannot launch a terminal as {login_username}: neither sudo nor runuser is available."
                 )
-            proc_cwd = "/"
+            proc_cwd = home
         else:
             raise RuntimeError(
                 f"Vortex Node is running as {current_username}, but the configured Linux account is {login_username}. "
