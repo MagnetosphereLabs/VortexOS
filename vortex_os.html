@@ -1054,7 +1054,7 @@ with:
 <body class="desktop">
   <div id="root">
     <!-- Welcome (first time) -->
-    <div id="screenWelcome" class="screen">
+    <div id="screenNodeSignIn" class="screen">
       <div class="panel">
         <div class="panelHead">
           <div class="logo" aria-hidden="true">
@@ -4116,10 +4116,11 @@ Replace with:
 
       const el = (id) => document.getElementById(id);
 
-      const screenWelcome = el("screenWelcome");
-      const screenReturn  = el("screenReturn");
-      const screenSetup   = el("screenSetup");
-      const screenUnlock  = el("screenUnlock");
+      const screenWelcome    = el("screenWelcome");
+      const screenNodeSignIn = el("screenNodeSignIn");
+      const screenReturn     = el("screenReturn");
+      const screenSetup      = el("screenSetup");
+      const screenUnlock     = el("screenUnlock");
 
       const osShell = el("os");
       const bootOverlay = el("bootOverlay");
@@ -4164,13 +4165,18 @@ Replace with:
       let gridVisible = false;
 
       function setScreen(which){
-        [screenWelcome, screenReturn, screenSetup, screenUnlock].forEach(s => s.classList.remove("active"));
+        [screenWelcome, screenNodeSignIn, screenReturn, screenSetup, screenUnlock]
+          .filter(Boolean)
+          .forEach(s => s.classList.remove("active"));
+      
         osShell.classList.remove("active");
-        if (which === "welcome") screenWelcome.classList.add("active");
-        if (which === "return")  screenReturn.classList.add("active");
-        if (which === "setup")   screenSetup.classList.add("active");
-        if (which === "unlock")  screenUnlock.classList.add("active");
-        if (which === "os")      osShell.classList.add("active");
+      
+        if (which === "welcome")     screenWelcome?.classList.add("active");
+        if (which === "node-signin") screenNodeSignIn?.classList.add("active");
+        if (which === "return")      screenReturn?.classList.add("active");
+        if (which === "setup")       screenSetup?.classList.add("active");
+        if (which === "unlock")      screenUnlock?.classList.add("active");
+        if (which === "os")          osShell.classList.add("active");
       }
 
       function setBoot(on, titleText, subText){
@@ -8079,52 +8085,52 @@ Replace with:
           st.addEventListener("keydown", (e)=>{ if (e.key === "Enter") openApp("clock"); });
         }
 
-        async function connectFromWelcome(){
-          setNodeOnboardingMessage("welcomeErr", "");
-
-          const nodeUrl = (el("nodeUrlInput")?.value || "").trim();
-          const username = (el("nodeUserInput")?.value || "").trim();
-          const password = (el("nodePasswordInput")?.value || "");
-          const otp = (el("nodeOtpInput")?.value || "").trim();
-
-          if (!nodeUrl || !username || !password){
-            setNodeOnboardingMessage("welcomeErr", "Node URL, username, and password are required.");
-            return;
-          }
-
-          setScreen("return");
-          setNodeOnboardingMessage("returnErr", "Signing in and syncing your cloud desktop…", false);
-
-          try{
-            await loginToVortexNetwork(nodeUrl, username, password, otp);
-            await loadRemoteProfileFromNode();
-            await bootIntoOS("Connected", "Syncing your cloud desktop…");
-          } catch (err){
-            setScreen("welcome");
-            setNodeOnboardingMessage("welcomeErr", err && err.message ? err.message : "Unable to sign in to Vortex Node.");
-            primeNodeOnboarding();
-          }
+      async function connectFromWelcome(){
+        setNodeOnboardingMessage("welcomeErr", "");
+      
+        const nodeUrl = (el("nodeUrlInput")?.value || "").trim();
+        const username = (el("nodeUserInput")?.value || "").trim();
+        const password = (el("nodePasswordInput")?.value || "");
+        const otp = (el("nodeOtpInput")?.value || "").trim();
+      
+        if (!nodeUrl || !username || !password){
+          setNodeOnboardingMessage("welcomeErr", "Node URL, username, and password are required.");
+          return;
         }
-
-        async function reconnectSavedSession(){
-          setNodeOnboardingMessage("returnErr", "Reconnecting to your saved node session…", false);
-          try{
-            if (getNetworkCfg().pairingToken){
-              await refreshAccessViaPairing();
-            } else {
-              await refreshVortexNetworkStatus();
-            }
-            await loadRemoteProfileFromNode();
-            await bootIntoOS("Welcome back", "Syncing your cloud desktop…");
-          } catch (err){
-            clearNodeSessionCache();
-            const n = getNetworkCfg();
-            Object.assign(n, networkDefaults(), { nodeUrl: detectDefaultNodeUrl() || "", status: "offline" });
-            setScreen("welcome");
-            setNodeOnboardingMessage("welcomeErr", err && err.message ? err.message : "Saved node session expired. Sign in again.");
-            primeNodeOnboarding();
-          }
+      
+        setScreen("return");
+        setNodeOnboardingMessage("returnErr", "Signing in and syncing your cloud desktop…", false);
+      
+        try{
+          await loginToVortexNetwork(nodeUrl, username, password, otp);
+          await loadRemoteProfileFromNode();
+          await bootIntoOS("Connected", "Syncing your cloud desktop…");
+        } catch (err){
+          setScreen("node-signin");
+          setNodeOnboardingMessage("welcomeErr", err && err.message ? err.message : "Unable to sign in to Vortex Node.");
+          primeNodeOnboarding();
         }
+      }
+      
+      async function reconnectSavedSession(){
+        setNodeOnboardingMessage("returnErr", "Reconnecting to your saved node session…", false);
+        try{
+          if (getNetworkCfg().pairingToken){
+            await refreshAccessViaPairing();
+          } else {
+            await refreshVortexNetworkStatus();
+          }
+          await loadRemoteProfileFromNode();
+          await bootIntoOS("Welcome back", "Syncing your cloud desktop…");
+        } catch (err){
+          clearNodeSessionCache();
+          const n = getNetworkCfg();
+          Object.assign(n, networkDefaults(), { nodeUrl: detectDefaultNodeUrl() || "", status: "offline" });
+          setScreen("node-signin");
+          setNodeOnboardingMessage("welcomeErr", err && err.message ? err.message : "Saved node session expired. Sign in again.");
+          primeNodeOnboarding();
+        }
+      }
 
         function bindEnterSubmit(inputId, buttonId){
           const inp = el(inputId);
@@ -8141,26 +8147,49 @@ Replace with:
         el("btnNodeSignIn")?.addEventListener("click", connectFromWelcome);
         el("btnUseSavedSession")?.addEventListener("click", reconnectSavedSession);
         el("btnReconnectSaved")?.addEventListener("click", reconnectSavedSession);
-
+        
+        el("btnSetupNew")?.addEventListener("click", ()=>{
+          setNodeOnboardingMessage("welcomeErr", "");
+          setScreen("node-signin");
+          primeNodeOnboarding();
+        });
+        
+        el("btnSetupRestoreNode")?.addEventListener("click", ()=>{
+          setNodeOnboardingMessage("welcomeErr", "");
+          setScreen("node-signin");
+          primeNodeOnboarding();
+        });
+        
+        el("btnSetupRestore")?.addEventListener("click", ()=>{
+          fileOS.value = "";
+          fileOS.click();
+        });
+        
         el("btnForgetSavedSession")?.addEventListener("click", ()=>{
           clearNodeSessionCache();
           const n = getNetworkCfg();
           Object.assign(n, networkDefaults(), { nodeUrl: detectDefaultNodeUrl() || "", status: "offline" });
           setNodeOnboardingMessage("returnErr", "");
-          setScreen("welcome");
+          setScreen("node-signin");
           primeNodeOnboarding();
         });
-
+        
         el("btnSwitchNode")?.addEventListener("click", ()=>{
           setNodeOnboardingMessage("returnErr", "");
-          setScreen("welcome");
+          setScreen("node-signin");
           primeNodeOnboarding();
         });
-
+        
+        el("btnUnlockImported")?.addEventListener("click", unlockImported);
+        el("btnUnlockBack")?.addEventListener("click", ()=>{
+          setScreen("welcome");
+        });
+        
         bindEnterSubmit("nodeUrlInput", "btnNodeSignIn");
         bindEnterSubmit("nodeUserInput", "btnNodeSignIn");
         bindEnterSubmit("nodePasswordInput", "btnNodeSignIn");
         bindEnterSubmit("nodeOtpInput", "btnNodeSignIn");
+        bindEnterSubmit("unlockPw", "btnUnlockImported");
         
         const btnSetupPfpUpload = el("btnSetupPfpUpload");
         const btnSetupPfpClear = el("btnSetupPfpClear");
@@ -8512,7 +8541,7 @@ Replace with:
         if (net.nodeUrl && (net.pairingToken || net.accessToken)){
           setScreen("return");
           setNodeOnboardingMessage("returnErr", "Reconnecting to your saved node session…", false);
-
+        
           try{
             if (net.pairingToken){
               await refreshAccessViaPairing();
@@ -8526,10 +8555,12 @@ Replace with:
             clearNodeSessionCache();
             Object.assign(net, networkDefaults(), { nodeUrl: detectDefaultNodeUrl() || "", status: "offline" });
             primeNodeOnboarding();
+            setScreen("node-signin");
             setNodeOnboardingMessage("welcomeErr", err && err.message ? err.message : "Saved node session expired. Sign in again.");
+            return;
           }
         }
-
+        
         setScreen("welcome");
       }
 
