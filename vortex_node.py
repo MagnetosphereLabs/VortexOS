@@ -1192,6 +1192,177 @@ def configured_system_home(cfg_raw: dict[str, t.Any]) -> pathlib.Path:
         return pathlib.Path("/root" if os.geteuid() == 0 else os.path.expanduser("~")).resolve()
 
 
+def current_effective_username() -> str:
+    try:
+        return pwd.getpwuid(os.geteuid()).pw_name
+    except Exception:
+        return str(os.geteuid())
+
+
+def build_system_user_command(cfg_raw: dict[str, t.Any], argv: list[str]) -> list[str]:
+    username = configured_system_username(cfg_raw)
+    current_username = current_effective_username()
+
+    if current_username == username:
+        return argv
+
+    if os.geteuid() == 0:
+        if which("sudo") is not None:
+            return ["sudo", "-n", "-u", username, "-H", "--", *argv]
+        if which("runuser") is not None:
+            return ["runuser", "-u", username, "--", *argv]
+
+    raise RuntimeError(
+        f"Unable to assume Linux user {username}. "
+        "Run Vortex Node as that user or as root with sudo/runuser available."
+    )
+
+
+SYSTEM_USER_LISTDIR_SCRIPT = r"""
+import json, pathlib, mimetypes, sys
+from datetime import datetime, timezone
+
+payload = json.loads(sys.stdin.read() or "{}")
+target = pathlib.Path(payload["path"]).expanduser().resolve(strict=False)
+
+entries = []
+for child in sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+    st = child.lstat()
+    entries.append({
+        "name": child.name or str(child),
+        "path": str(child),
+        "is_dir": child.is_dir(),
+        "is_file": child.is_file(),
+        "is_symlink": child.is_symlink(),
+        "size": st.st_size if child.is_file() else 0,
+        "mime_type": "inode/directory" if child.is_dir() else (mimetypes.guess_type(str(child))[0] or "application/octet-stream"),
+        "modified_at": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+    })
+
+print(json.dumps({
+    "path": str(target),
+    "parent": str(target.parent) if target != target.parent else None,
+    "entries": entries,
+}))
+"""
+
+SYSTEM_USER_READ_TEXT_SCRIPT = r"""
+import json, pathlib, mimetypes, sys
+
+payload = json.loads(sys.stdin.read() or "{}")
+target = pathlib.Path(payload["path"]).expanduser().resolve(strict=False)
+max_bytes = int(payload.get("max_bytes") or 262144)
+
+raw = target.read_bytes()
+preview = raw[:max_bytes]
+
+print(json.dumps({
+    "path": str(target),
+    "name": target.name,
+    "mime_type": mimetypes.guess_type(str(target))[0] or "text/plain",
+    "text": preview.decode("utf-8", errors="replace"),
+    "truncated": len(raw) > max_bytes,
+    "size": len(raw),
+}))
+"""
+
+SYSTEM_USER_READ_BYTES_SCRIPT = r"""
+import base64, json, pathlib, mimetypes, sys
+
+payload = json.loads(sys.stdin.read() or "{}")
+target = pathlib.Path(payload["path"]).expanduser().resolve(strict=False)
+raw = target.read_bytes()
+
+print(json.dumps({
+    "path": str(target),
+    "name": target.name,
+    "mime_type": mimetypes.guess_type(str(target))[0] or "application/octet-stream",
+    "size": len(raw),
+    "body_b64": base64.b64encode(raw).decode("ascii"),
+}))
+"""
+
+SYSTEM_USER_MUTATE_SCRIPT = r"""
+import base64, json, mimetypes, pathlib, shutil, sys
+from datetime import datetime, timezone
+
+payload = json.loads(sys.stdin.read() or "{}")
+op = payload.get("op")
+
+def entry(path):
+    st = path.lstat()
+    return {
+        "name": path.name or str(path),
+        "path": str(path),
+        "is_dir": path.is_dir(),
+        "is_file": path.is_file(),
+        "is_symlink": path.is_symlink(),
+        "size": st.st_size if path.is_file() else 0,
+        "mime_type": "inode/directory" if path.is_dir() else (mimetypes.guess_type(str(path))[0] or "application/octet-stream"),
+        "modified_at": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+    }
+
+if op == "write":
+    target = pathlib.Path(payload["path"]).expanduser().resolve(strict=False)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    body_b64 = payload.get("body_b64")
+    if body_b64 is not None:
+        target.write_bytes(base64.b64decode(body_b64))
+    else:
+        target.write_text(str(payload.get("text", "")), "utf-8")
+    print(json.dumps({"ok": True, "entry": entry(target)}))
+
+elif op == "mkdir":
+    target = pathlib.Path(payload["path"]).expanduser().resolve(strict=False)
+    target.mkdir(
+        parents=bool(payload.get("parents", True)),
+        exist_ok=bool(payload.get("exist_ok", True)),
+    )
+    print(json.dumps({"ok": True, "entry": entry(target)}))
+
+elif op == "rename":
+    old_path = pathlib.Path(payload["old_path"]).expanduser().resolve(strict=False)
+    new_path = pathlib.Path(payload["new_path"]).expanduser().resolve(strict=False)
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    old_path.rename(new_path)
+    print(json.dumps({"ok": True, "entry": entry(new_path)}))
+
+elif op == "delete":
+    target = pathlib.Path(payload["path"]).expanduser().resolve(strict=False)
+    if target.is_dir():
+        if bool(payload.get("recursive", True)):
+            shutil.rmtree(target)
+        else:
+            target.rmdir()
+    else:
+        target.unlink()
+    print(json.dumps({"ok": True, "path": str(target)}))
+
+else:
+    raise SystemExit("Unsupported op")
+"""
+
+def run_python_as_system_user(cfg_raw: dict[str, t.Any], script: str, payload: dict[str, t.Any]) -> dict[str, t.Any]:
+    cmd = build_system_user_command(cfg_raw, [sys.executable, "-c", script])
+    result = run_command(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        input_data=json.dumps(payload),
+    )
+    if result.returncode != 0:
+        message = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
+        lowered = message.lower()
+        if "permission denied" in lowered or "permissionerror" in lowered:
+            raise HTTPException(403, message or "Permission denied")
+        raise HTTPException(500, message or "System-user helper failed")
+    try:
+        return json.loads(result.stdout or "{}")
+    except Exception as exc:
+        raise HTTPException(500, "System-user helper returned invalid JSON") from exc
+
+
 def resolve_node_path(raw_path: str | None, *, cfg_raw: dict[str, t.Any], allow_missing: bool = False) -> pathlib.Path:
     raw = str(raw_path or "").strip()
 
@@ -1546,70 +1717,81 @@ class TerminalRuntime:
             raise HTTPException(404, "Unknown terminal session")
         return session
 
-    def _resolve_user(self, username: str) -> tuple[int | None, int | None, str, str]:
+    def _resolve_user(self, username: str) -> tuple[str, str, str]:
         try:
-            pw = pwd.getpwnam(username)
+            pw = pwd.getpwnam(str(username or "").strip())
             shell = pw.pw_shell or os.environ.get("SHELL") or "/bin/bash"
-            return pw.pw_uid, pw.pw_gid, pw.pw_dir, shell
+            home = pw.pw_dir or os.path.expanduser("~")
+            return pw.pw_name, home, shell
         except Exception:
-            home = os.path.expanduser("~")
-            return None, None, home, os.environ.get("SHELL") or "/bin/bash"
+            return (
+                str(username or os.environ.get("USER") or "owner"),
+                os.path.expanduser("~"),
+                os.environ.get("SHELL") or "/bin/bash",
+            )
 
     def _set_winsize(self, fd: int, rows: int, cols: int) -> None:
         packed = struct.pack("HHHH", max(2, int(rows)), max(8, int(cols)), 0, 0)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
 
     def _spawn_shell(self, username: str, rows: int = 34, cols: int = 120) -> tuple[int, int, str]:
-        uid, gid, home, shell = self._resolve_user(username)
-        cwd = home or os.path.expanduser("~")
+        login_username, home, shell = self._resolve_user(username)
+        shell_name = os.path.basename(shell) or "bash"
+        shell_argv = [shell, "-il"] if shell_name in {"bash", "zsh", "fish"} else [shell, "-i"]
 
         master_fd, slave_fd = pty.openpty()
         self._set_winsize(slave_fd, rows, cols)
 
-        pid = os.fork()
-        if pid == 0:
-            try:
-                os.setsid()
-                with contextlib.suppress(Exception):
-                    fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+        env = os.environ.copy()
+        env.setdefault("TERM", "xterm-256color")
+        env.setdefault("COLORTERM", "truecolor")
+        env["HOME"] = home
+        env["PWD"] = home
+        env["SHELL"] = shell
+        env["USER"] = login_username
+        env["LOGNAME"] = login_username
+        env["LANG"] = env.get("LANG") or "C.UTF-8"
+        env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
 
-                os.dup2(slave_fd, 0)
-                os.dup2(slave_fd, 1)
-                os.dup2(slave_fd, 2)
+        try:
+            current_username = pwd.getpwuid(os.geteuid()).pw_name
+        except Exception:
+            current_username = str(os.geteuid())
 
-                with contextlib.suppress(Exception):
-                    os.close(master_fd)
-                with contextlib.suppress(Exception):
-                    os.close(slave_fd)
+        if current_username == login_username:
+            cmd = shell_argv
+            proc_cwd = home
+        elif os.geteuid() == 0:
+            if which("sudo") is not None:
+                cmd = ["sudo", "-n", "-u", login_username, "-H", "--", *shell_argv]
+            elif which("runuser") is not None:
+                cmd = ["runuser", "-u", login_username, "--", *shell_argv]
+            else:
+                raise RuntimeError(
+                    f"Cannot launch a terminal as {login_username}: neither sudo nor runuser is available."
+                )
+            proc_cwd = "/"
+        else:
+            raise RuntimeError(
+                f"Vortex Node is running as {current_username}, but the configured Linux account is {login_username}. "
+                "Run the node as that Linux account or run it as root."
+            )
 
-                env = os.environ.copy()
-                env.setdefault("TERM", "xterm-256color")
-                env.setdefault("COLORTERM", "truecolor")
-                env["HOME"] = cwd
-                env["PWD"] = cwd
-                env["SHELL"] = shell
-                env["USER"] = username
-                env["LOGNAME"] = username
-                env["LANG"] = env.get("LANG") or "C.UTF-8"
-                env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
-
-                os.chdir(cwd)
-
-                if os.geteuid() == 0 and gid is not None:
-                    os.setgid(gid)
-                if os.geteuid() == 0 and uid is not None:
-                    os.setuid(uid)
-
-                shell_name = os.path.basename(shell) or "bash"
-                argv = [shell_name, "-il"] if shell_name in {"bash", "zsh", "fish"} else [shell_name, "-i"]
-                os.execvpe(shell, argv, env)
-            except Exception:
-                os._exit(1)
+        proc = subprocess.Popen(
+            cmd,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=proc_cwd,
+            env=env,
+            start_new_session=True,
+            close_fds=True,
+        )
 
         os.close(slave_fd)
         flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-        return pid, master_fd, cwd
+        return proc.pid, master_fd, home
 
     async def create_session(self, username: str) -> TerminalSessionState:
         session_id = secrets.token_urlsafe(12)
@@ -4007,39 +4189,41 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
         target = resolve_node_path(path, cfg_raw=cfg.raw)
         if not target.is_dir():
             raise HTTPException(400, f"Not a directory: {target}")
-    
+
         try:
             children = list(target.iterdir())
-        except PermissionError as exc:
-            raise HTTPException(
-                403,
-                f"Permission denied listing {target}. "
-                "Vortex Node must be running as root for full-host Files access."
-            ) from exc
-    
-        entries: list[dict[str, t.Any]] = []
-        for child in sorted(children, key=lambda p: (not p.is_dir(), p.name.lower())):
-            try:
-                entries.append(file_entry_payload(child))
-            except Exception as exc:
-                entries.append({
-                    "name": child.name,
-                    "path": str(child),
-                    "is_dir": False,
-                    "is_file": False,
-                    "is_symlink": child.is_symlink(),
-                    "size": 0,
-                    "mime_type": "application/octet-stream",
-                    "modified_at": "",
-                    "error": str(exc),
-                })
-    
-        return JSONResponse({
-            "path": str(target),
-            "parent": str(target.parent) if target != target.parent else None,
-            "home": str(configured_system_home(cfg.raw)),
-            "entries": entries,
-        })
+            entries: list[dict[str, t.Any]] = []
+            for child in sorted(children, key=lambda p: (not p.is_dir(), p.name.lower())):
+                try:
+                    entries.append(file_entry_payload(child))
+                except Exception as exc:
+                    entries.append({
+                        "name": child.name,
+                        "path": str(child),
+                        "is_dir": False,
+                        "is_file": False,
+                        "is_symlink": child.is_symlink(),
+                        "size": 0,
+                        "mime_type": "application/octet-stream",
+                        "modified_at": "",
+                        "error": str(exc),
+                    })
+
+            return JSONResponse({
+                "path": str(target),
+                "parent": str(target.parent) if target != target.parent else None,
+                "home": str(configured_system_home(cfg.raw)),
+                "entries": entries,
+            })
+
+        except PermissionError:
+            data = run_python_as_system_user(
+                cfg.raw,
+                SYSTEM_USER_LISTDIR_SCRIPT,
+                {"path": str(target)},
+            )
+            data["home"] = str(configured_system_home(cfg.raw))
+            return JSONResponse(data)
 
     @app.get("/api/files/text")
     async def read_file_text(request: Request, path: str, max_bytes: int = 262144) -> JSONResponse:
@@ -4048,21 +4232,30 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
         if not target.is_file():
             raise HTTPException(400, f"Not a file: {target}")
 
-        size = target.stat().st_size
-        with target.open("rb") as fh:
-            raw = fh.read(max_bytes + 1)
+        try:
+            size = target.stat().st_size
+            with target.open("rb") as fh:
+                raw = fh.read(max_bytes + 1)
 
-        truncated = len(raw) > max_bytes or size > max_bytes
-        preview = raw[:max_bytes].decode("utf-8", errors="replace")
+            truncated = len(raw) > max_bytes or size > max_bytes
+            preview = raw[:max_bytes].decode("utf-8", errors="replace")
 
-        return JSONResponse({
-            "path": str(target),
-            "name": target.name,
-            "mime_type": mimetypes.guess_type(str(target))[0] or "text/plain",
-            "text": preview,
-            "truncated": truncated,
-            "size": size,
-        })
+            return JSONResponse({
+                "path": str(target),
+                "name": target.name,
+                "mime_type": mimetypes.guess_type(str(target))[0] or "text/plain",
+                "text": preview,
+                "truncated": truncated,
+                "size": size,
+            })
+
+        except PermissionError:
+            data = run_python_as_system_user(
+                cfg.raw,
+                SYSTEM_USER_READ_TEXT_SCRIPT,
+                {"path": str(target), "max_bytes": int(max_bytes)},
+            )
+            return JSONResponse(data)
 
     @app.get("/api/files/content")
     async def read_file_content(request: Request, path: str, download: bool = False) -> Response:
@@ -4079,7 +4272,23 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
         if download:
             headers["content-disposition"] = f'attachment; filename="{target.name}"'
 
-        return FileResponse(target, media_type=media_type, headers=headers)
+        try:
+            with target.open("rb"):
+                pass
+            return FileResponse(target, media_type=media_type, headers=headers)
+
+        except PermissionError:
+            data = run_python_as_system_user(
+                cfg.raw,
+                SYSTEM_USER_READ_BYTES_SCRIPT,
+                {"path": str(target)},
+            )
+            body = base64.b64decode(str(data.get("body_b64") or ""))
+            return Response(
+                content=body,
+                media_type=str(data.get("mime_type") or media_type),
+                headers=headers,
+            )
 
     @app.post("/api/files/write")
     async def write_file(request: Request) -> JSONResponse:
@@ -4090,22 +4299,32 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
         if target.exists() and target.is_dir():
             raise HTTPException(400, f"Cannot overwrite directory: {target}")
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        body_b64 = payload.get("body_b64")
-        if body_b64 is not None:
-            try:
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            body_b64 = payload.get("body_b64")
+            if body_b64 is not None:
                 data = base64.b64decode(str(body_b64), validate=True)
-            except Exception as exc:
-                raise HTTPException(400, "body_b64 is not valid base64") from exc
-            target.write_bytes(data)
-        else:
-            target.write_text(str(payload.get("text", "")), "utf-8")
+                target.write_bytes(data)
+            else:
+                target.write_text(str(payload.get("text", "")), "utf-8")
 
-        return JSONResponse({
-            "ok": True,
-            "entry": file_entry_payload(target),
-        })
+            return JSONResponse({
+                "ok": True,
+                "entry": file_entry_payload(target),
+            })
+
+        except (PermissionError, OSError):
+            data = run_python_as_system_user(
+                cfg.raw,
+                SYSTEM_USER_MUTATE_SCRIPT,
+                {
+                    "op": "write",
+                    "path": str(target),
+                    "body_b64": payload.get("body_b64"),
+                    "text": payload.get("text", ""),
+                },
+            )
+            return JSONResponse(data)
 
     @app.post("/api/files/mkdir")
     async def make_directory(request: Request) -> JSONResponse:
@@ -4113,15 +4332,29 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
         payload = await request.json()
 
         target = resolve_node_path(payload.get("path"), cfg_raw=cfg.raw, allow_missing=True)
-        target.mkdir(
-            parents=bool(payload.get("parents", True)),
-            exist_ok=bool(payload.get("exist_ok", True)),
-        )
 
-        return JSONResponse({
-            "ok": True,
-            "entry": file_entry_payload(target),
-        })
+        try:
+            target.mkdir(
+                parents=bool(payload.get("parents", True)),
+                exist_ok=bool(payload.get("exist_ok", True)),
+            )
+            return JSONResponse({
+                "ok": True,
+                "entry": file_entry_payload(target),
+            })
+
+        except (PermissionError, OSError):
+            data = run_python_as_system_user(
+                cfg.raw,
+                SYSTEM_USER_MUTATE_SCRIPT,
+                {
+                    "op": "mkdir",
+                    "path": str(target),
+                    "parents": bool(payload.get("parents", True)),
+                    "exist_ok": bool(payload.get("exist_ok", True)),
+                },
+            )
+            return JSONResponse(data)
 
     @app.post("/api/files/rename")
     async def rename_path(request: Request) -> JSONResponse:
@@ -4130,13 +4363,26 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
 
         old_path = resolve_node_path(payload.get("old_path"), cfg_raw=cfg.raw)
         new_path = resolve_node_path(payload.get("new_path"), cfg_raw=cfg.raw, allow_missing=True)
-        new_path.parent.mkdir(parents=True, exist_ok=True)
-        old_path.rename(new_path)
 
-        return JSONResponse({
-            "ok": True,
-            "entry": file_entry_payload(new_path),
-        })
+        try:
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            old_path.rename(new_path)
+            return JSONResponse({
+                "ok": True,
+                "entry": file_entry_payload(new_path),
+            })
+
+        except (PermissionError, OSError):
+            data = run_python_as_system_user(
+                cfg.raw,
+                SYSTEM_USER_MUTATE_SCRIPT,
+                {
+                    "op": "rename",
+                    "old_path": str(old_path),
+                    "new_path": str(new_path),
+                },
+            )
+            return JSONResponse(data)
 
     @app.post("/api/files/delete")
     async def delete_path(request: Request) -> JSONResponse:
@@ -4146,18 +4392,31 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
         target = resolve_node_path(payload.get("path"), cfg_raw=cfg.raw)
         recursive = bool(payload.get("recursive", True))
 
-        if target.is_dir():
-            if recursive:
-                shutil.rmtree(target)
+        try:
+            if target.is_dir():
+                if recursive:
+                    shutil.rmtree(target)
+                else:
+                    target.rmdir()
             else:
-                target.rmdir()
-        else:
-            target.unlink()
+                target.unlink()
 
-        return JSONResponse({
-            "ok": True,
-            "path": str(target),
-        })
+            return JSONResponse({
+                "ok": True,
+                "path": str(target),
+            })
+
+        except (PermissionError, OSError):
+            data = run_python_as_system_user(
+                cfg.raw,
+                SYSTEM_USER_MUTATE_SCRIPT,
+                {
+                    "op": "delete",
+                    "path": str(target),
+                    "recursive": recursive,
+                },
+            )
+            return JSONResponse(data)
   
     @app.post("/api/terminal/sessions")
     async def create_terminal_session(request: Request) -> JSONResponse:
@@ -4894,29 +5153,28 @@ def run_server() -> int:
         return 1
 
     cfg_raw = migrate_config(read_json(CONFIG_PATH, {}))
-
-    if sys.platform == "linux" and os.geteuid() != 0:
-        print(
-            "Vortex Node must run as root for full-host Files and Terminal access. "
-            f"Current euid={os.geteuid()} configured_system_username={configured_system_username(cfg_raw)}"
-        )
-        return 1
+    write_json(CONFIG_PATH, cfg_raw)
 
     cfg = NodeConfig(cfg_raw)
+    host = cfg.server.get("host", "127.0.0.1")
+    port = int(cfg.server.get("port", 8787))
 
-    print(f"{APP_NAME} {APP_VERSION}")
-    print(f"Binding on {cfg.server.get('host', '127.0.0.1')}:{cfg.server.get('port', 8787)}")
+    print(f"\n{APP_NAME} {APP_VERSION}")
+    print(f"Binding on {host}:{port}")
     print(f"Public base URL: {cfg.server.get('public_base_url')}")
-    print(f"Egress mode: {cfg.egress.get('route_mode', 'direct')}")
-    print(f"Browser mode: {cfg.browser.get('mode', 'stream')}")
-    print_tmux_hint()
+    print(f"Egress mode: {cfg.egress.get('route_mode')}")
+    print(f"Browser mode: {cfg.browser.get('mode')}")
+    print(f"Effective OS user: {current_effective_username()} (uid={os.geteuid()})")
+    print(f"Configured Linux account: {configured_system_username(cfg_raw)}")
+
+    if cfg.raw.get("ops", {}).get("use_tmux"):
+        print_tmux_hint()
 
     app = create_app(cfg)
     uvicorn.run(
         app,
-        host=str(cfg.server.get("host", "127.0.0.1")),
-        port=int(cfg.server.get("port", 8787)),
-        log_level="info",
+        host=host,
+        port=port,
         proxy_headers=True,
         forwarded_allow_ips="*",
     )
