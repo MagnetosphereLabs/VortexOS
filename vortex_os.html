@@ -3399,7 +3399,7 @@ with:
     <div class="content">
       <section id="tab-profile">
         <h2>Profile</h2>
-        <div class="hint">Your profile is stored inside the encrypted Vortex OS file.</div>
+        <div class="hint">Your profile is stored on your Vortex Node and synced across your devices.</div>
         <div class="row" style="margin-top:12px;">
           <div class="pfp"><img id="pfpImg" alt="" /></div>
           <div style="flex:1;min-width: 180px;">
@@ -3415,26 +3415,17 @@ with:
 
       <section id="tab-appearance" style="display:none;">
         <h2>Appearance</h2>
-        <div class="hint">Choose a wallpaper style. This only affects the OS shell.</div>
+        <div class="hint">Choose a wallpaper style. This syncs through your Vortex Node with the rest of your desktop profile.</div>
         <div class="swatches" id="swatches"></div>
       </section>
 
       <section id="tab-os" style="display:none;">
-        <h2>OS</h2>
-        <div class="hint">Export and import your encrypted OS file.</div>
+        <h2>This device</h2>
+        <div class="hint">VortexOS now uses your Vortex Node as the source of truth. Signing out here only removes this device session and returns you to the node sign-in screen.</div>
         <div class="row">
-          <button id="btnExport" class="btn">Export vortex.os</button>
-          <button id="btnImport" class="btn">Import vortex.os</button>
+          <button id="btnDeviceSignOut" class="btn danger">Sign out on this device</button>
         </div>
 
-        <div class="divider"></div>
-        
-        <h2>Factory reset</h2>
-        <div class="hint">Deletes the encrypted vortex.os profile stored in this browser and restarts VortexOS like a brand new install.</div>
-        <div class="row">
-          <button id="btnFactoryResetOS" class="btn danger">Erase and reinstall VortexOS</button>
-        </div>
-        
         <div class="divider"></div>
 
         <h2>Clock</h2>
@@ -3481,7 +3472,6 @@ with:
           <button id="btnEnterFullscreen" class="btn">Enter fullscreen</button>
           <button id="btnExitFullscreen" class="btn danger">Exit fullscreen</button>
         </div>
-
       </section>
 
       <section id="tab-network" style="display:none;">
@@ -3558,6 +3548,40 @@ with:
         <div class="divider"></div>
 
         <h2>Two-factor authentication</h2>
+
+Replace with:
+
+        <div class="row">
+          <button id="btnNetworkSaveNodeSettings" class="btn">Save node settings</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <h2>Software updates</h2>
+        <div class="hint">By default the node updates from the official public Vortex repo. Change these only if you want this node to pull updates from your own fork or another GitHub repo.</div>
+
+        <label for="networkUpdateOwner">GitHub owner</label>
+        <input id="networkUpdateOwner" type="text" placeholder="MagnetosphereLabs" />
+
+        <label for="networkUpdateRepo">GitHub repo</label>
+        <input id="networkUpdateRepo" type="text" placeholder="VortexOS" />
+
+        <label for="networkUpdateBranch">GitHub branch</label>
+        <input id="networkUpdateBranch" type="text" placeholder="main" />
+
+        <label for="networkUpdateBackendPath">Backend path</label>
+        <input id="networkUpdateBackendPath" type="text" placeholder="vortex_node.py" />
+
+        <label for="networkUpdateFrontendPath">Frontend path</label>
+        <input id="networkUpdateFrontendPath" type="text" placeholder="vortex_os.html" />
+
+        <div class="row">
+          <button id="btnNetworkSaveUpdateSource" class="btn">Save update source</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <h2>Two-factor authentication</h2>
         <div class="list">
           <div class="item" id="networkTotpCard"></div>
         </div>
@@ -3579,7 +3603,7 @@ with:
       
       <section id="tab-apps" style="display:none;">
         <h2>Apps</h2>
-        <div class="hint">Built-in apps come with VortexOS. Hosted websites load from a URL. Custom HTML apps are stored directly inside your encrypted OS file. Add or edit an app to change how it opens. Prefix a hosted website URL with <code>vortexnet:</code> to run it through your connected Vortex Network node, for example <code>vortexnet:https://google.com</code>.</div>
+        <div class="hint">Built-in apps come with VortexOS. Hosted websites load from a URL. Custom HTML apps are stored directly on your synced Vortex Node profile. Add or edit an app to change how it opens. Prefix a hosted website URL with <code>vortexnet:</code> to run it through your connected Vortex Network node, for example <code>vortexnet:https://google.com</code>. You can pin up to 10 apps to the dock.</div>
         <div class="row">
           <button id="btnAddApp" class="btn">Add app</button>
         </div>
@@ -3614,10 +3638,11 @@ with:
 
     let state = null;
 
-    const networkNodeUrl = document.getElementById("networkNodeUrl");
-    const networkUsername = document.getElementById("networkUsername");
-    const networkPassword = document.getElementById("networkPassword");
-    const networkOtp = document.getElementById("networkOtp");
+    const networkUpdateOwner = document.getElementById("networkUpdateOwner");
+    const networkUpdateRepo = document.getElementById("networkUpdateRepo");
+    const networkUpdateBranch = document.getElementById("networkUpdateBranch");
+    const networkUpdateBackendPath = document.getElementById("networkUpdateBackendPath");
+    const networkUpdateFrontendPath = document.getElementById("networkUpdateFrontendPath");
 
     const networkGlobalRoute = document.getElementById("networkGlobalRoute");
     const networkBrowserRoute = document.getElementById("networkBrowserRoute");
@@ -3693,25 +3718,41 @@ with:
       if (networkScreenshotQuality) networkScreenshotQuality.value = String(net.screenshotQuality || 80);
       if (networkAutoUpdate) networkAutoUpdate.checked = net.autoUpdatesEnabled !== false;
 
+      if (networkUpdateOwner && document.activeElement !== networkUpdateOwner) networkUpdateOwner.value = net.updateOwner || "MagnetosphereLabs";
+      if (networkUpdateRepo && document.activeElement !== networkUpdateRepo) networkUpdateRepo.value = net.updateRepo || "VortexOS";
+      if (networkUpdateBranch && document.activeElement !== networkUpdateBranch) networkUpdateBranch.value = net.updateBranch || "main";
+      if (networkUpdateBackendPath && document.activeElement !== networkUpdateBackendPath) networkUpdateBackendPath.value = net.updateBackendPath || "vortex_node.py";
+      if (networkUpdateFrontendPath && document.activeElement !== networkUpdateFrontendPath) networkUpdateFrontendPath.value = net.updateFrontendPath || "vortex_os.html";
+      
       if (networkStatusCard){
         const title = connected ? "Connected" : (net.status === "auth-expired" ? "Session expired" : "Not connected");
         const primary = connected
           ? (net.currentBrowserUrl || net.nodeUrl || "Connected")
           : (net.nodeUrl || "No node configured yet");
+
         const meta = [
           net.status || "offline",
           net.globalRouteMode || "direct",
           "live remote",
           `${net.screenshotFps || 60} FPS`,
-          `${net.screenshotQuality || 80}%`
+          `${net.screenshotQuality || 70}%`
         ].join(" · ");
+
+        const extra = [
+          net.systemUsername ? `Linux user: ${net.systemUsername}` : "",
+          net.filesHomePath ? `Files home: ${net.filesHomePath}` : "",
+          (net.updateOwner && net.updateRepo) ? `Updates: ${net.updateOwner}/${net.updateRepo}@${net.updateBranch || "main"}` : ""
+        ].filter(Boolean).join("<br>");
 
         networkStatusCard.innerHTML = `
           <div style="min-width:0;flex:1;">
             <div class="itemName">${title}</div>
             <div style="margin-top:4px;font-size:11px;color:var(--muted);white-space:normal;line-height:1.35;">${primary}</div>
           </div>
-          <div style="font-size:11px;color:var(--muted);text-align:right;line-height:1.35;">${meta}</div>
+          <div style="font-size:11px;color:var(--muted);text-align:right;line-height:1.35;">
+            ${meta}
+            ${extra ? `<div style="margin-top:4px;white-space:normal;">${extra}</div>` : ""}
+          </div>
         `;
       }
 
@@ -3773,7 +3814,7 @@ with:
         name.textContent = item.name;
 
         const meta = document.createElement("div");
-        meta.textContent = `${item.typeLabel} · ${item.openLabel}${item.usesOwnLaunchMode ? " · app setting" : " · OS default"}`;
+        meta.textContent = `${item.typeLabel} · ${item.openLabel}${item.usesOwnLaunchMode ? " · app setting" : " · OS default"}${item.pinned ? " · pinned" : ""}`;
         meta.style.marginTop = "4px";
         meta.style.fontSize = "11px";
         meta.style.lineHeight = "1.35";
@@ -3786,6 +3827,14 @@ with:
         const right = document.createElement("div");
         right.className = "miniRow";
 
+        const pin = document.createElement("button");
+        pin.className = "btn";
+        pin.textContent = item.pinned ? "Unpin" : "Pin";
+        pin.addEventListener("click", ()=>{
+          parent.postMessage({ type: "vortex.os.togglePin", appId: item.id }, "*");
+        });
+        right.appendChild(pin);
+        
         if (item.editable){
           const edit = document.createElement("button");
           edit.className = "btn";
@@ -3840,6 +3889,7 @@ with:
     const btnNetworkConnect = document.getElementById("btnNetworkConnect");
     const btnNetworkDisconnect = document.getElementById("btnNetworkDisconnect");
     const btnNetworkSaveNodeSettings = document.getElementById("btnNetworkSaveNodeSettings");
+    const btnNetworkSaveUpdateSource = document.getElementById("btnNetworkSaveUpdateSource");
     const btnNetworkSetup2fa = document.getElementById("btnNetworkSetup2fa");
     const btnNetworkDisable2fa = document.getElementById("btnNetworkDisable2fa");
 
@@ -3874,6 +3924,19 @@ with:
       }, "*");
     });
 
+    btnNetworkSaveUpdateSource && btnNetworkSaveUpdateSource.addEventListener("click", ()=>{
+      parent.postMessage({
+        type: "vortex.settings.network.saveNodeSettings",
+        patch: {
+          update_owner: networkUpdateOwner ? networkUpdateOwner.value.trim() : "MagnetosphereLabs",
+          update_repo: networkUpdateRepo ? networkUpdateRepo.value.trim() : "VortexOS",
+          update_branch: networkUpdateBranch ? networkUpdateBranch.value.trim() : "main",
+          update_backend_path: networkUpdateBackendPath ? networkUpdateBackendPath.value.trim() : "vortex_node.py",
+          update_frontend_path: networkUpdateFrontendPath ? networkUpdateFrontendPath.value.trim() : "vortex_os.html"
+        }
+      }, "*");
+    });
+    
     btnNetworkSetup2fa && btnNetworkSetup2fa.addEventListener("click", ()=>{
       parent.postMessage({ type: "vortex.settings.network.setup2fa" }, "*");
     });
@@ -5760,6 +5823,10 @@ with:
           ? terminalWindowState("vortex-terminal")
           : null;
 
+        const fileState = (appId === "vortex-files")
+          ? fileWindowState("vortex-files")
+          : null;
+        
         const remoteSessionId =
           win.querySelector(".appHost")?.dataset?.vortexSessionId ||
           (browserState ? browserState.sessionId : "");
@@ -5787,6 +5854,10 @@ with:
             browserState.ws = null;
           }
         }
+
+        if (fileState){
+          clearFilePreview("vortex-files");
+        }
         
         win.classList.remove("open", "minimized");
         win.classList.add("closing");
@@ -5800,6 +5871,10 @@ with:
             delete terminalStates["vortex-terminal"];
           }
           if (focusedAppId === appId) focusedAppId = null;
+          if (appId === "vortex-files"){
+            clearFilePreview("vortex-files");
+            delete fileBrowserStates["vortex-files"];
+          }
         }, WIN_ANIM_MS);
       }
 
@@ -6003,6 +6078,11 @@ with:
           frame?.addEventListener("load", () => syncSettingsIframe());
         }
 
+        if (appMeta.id === "vortex-files") {
+          const frame = host.querySelector("iframe");
+          frame?.addEventListener("load", () => syncFilesIframe(appMeta.id));
+        }
+        
         windowsLayer.appendChild(win);
         openWindows.set(appMeta.id, win);
 
@@ -6614,6 +6694,7 @@ with:
 
         const mo = decryptedConfig?.apps?.metaOverrides || {};
         const appPrefs = decryptedConfig?.os?.appLaunchPrefs || {};
+        const pinned = new Set(normalizedPinnedApps());
 
         for (const b of BUILTINS){
           const name = (mo[b.id]?.name || b.name);
@@ -6628,7 +6709,8 @@ with:
             launchMode: openMode,
             openLabel: openMode === "external" ? "Browser tab" : "Windowed in VortexOS",
             usesOwnLaunchMode: Object.prototype.hasOwnProperty.call(appPrefs, b.id),
-            typeLabel
+            typeLabel,
+            pinned: pinned.has(b.id),
           });
         }
 
@@ -6645,7 +6727,8 @@ with:
             usesOwnLaunchMode: Object.prototype.hasOwnProperty.call(appPrefs, u.id),
             typeLabel: (u.type || (u.url ? "url" : "html")) === "url"
               ? ((String(u.url || "").trim().toLowerCase().startsWith("vortexnet:")) ? "Vortex Network website" : "Hosted website")
-              : "Custom HTML app"
+              : "Custom HTML app",
+            pinned: pinned.has(u.id),
           });
         }
 
@@ -6797,8 +6880,15 @@ with:
             screenshotFps: nodeSettings.screenshotFps || 60,
             screenshotQuality: nodeSettings.screenshotQuality || 80,
             autoUpdatesEnabled: nodeSettings.autoUpdatesEnabled !== false,
+            updateOwner: nodeSettings.updateOwner || "MagnetosphereLabs",
+            updateRepo: nodeSettings.updateRepo || "VortexOS",
+            updateBranch: nodeSettings.updateBranch || "main",
+            updateBackendPath: nodeSettings.updateBackendPath || "vortex_node.py",
+            updateFrontendPath: nodeSettings.updateFrontendPath || "vortex_os.html",
             totpEnabled: !!nodeSettings.totpEnabled,
-            pairedDevices: nodeSettings.pairedDevices || []
+            pairedDevices: nodeSettings.pairedDevices || [],
+            systemUsername: nodeSettings.systemUsername || "",
+            filesHomePath: nodeSettings.filesHomePath || ""
           },
 
           themes: THEME_PRESETS.map(t => ({
@@ -6835,9 +6925,8 @@ with:
         if (msg.type === "vortex.settings.network.login"){
           try{
             await loginToVortexNetwork(msg.nodeUrl, msg.username, msg.password, msg.otp || "");
-            await fetchNodeSettings();
-            syncSettingsIframe();
-            syncBrowserIframe();
+            await loadRemoteProfileFromNode();
+            await bootIntoOS("Connected", "Syncing your cloud desktop…");
           } catch (err){
             alert(err && err.message ? err.message : "Unable to connect to Vortex Node.");
           }
@@ -6852,6 +6941,10 @@ with:
         if (msg.type === "vortex.settings.network.refresh"){
           try{
             await refreshVortexNetworkStatus();
+            await loadRemoteProfileFromNode();
+            syncSettingsIframe();
+            syncBrowserIframe("vortex-browser");
+            syncFilesIframe("vortex-files");
           } catch (err){
             alert(err && err.message ? err.message : "Unable to refresh node status.");
           }
@@ -6863,7 +6956,8 @@ with:
           n[msg.key] = msg.value;
           await persistConfig();
           syncSettingsIframe();
-          syncBrowserIframe();
+          syncBrowserIframe("vortex-browser");
+          syncFilesIframe("vortex-files");
           return;
         }
 
@@ -6875,8 +6969,10 @@ with:
               body: JSON.stringify(msg.patch || {})
             });
             await fetchNodeSettings();
+            await persistConfig();
             syncSettingsIframe();
-            syncBrowserIframe();
+            syncBrowserIframe("vortex-browser");
+            syncFilesIframe("vortex-files");
           } catch (err){
             alert(err && err.message ? err.message : "Unable to save node settings.");
           }
@@ -6907,35 +7003,6 @@ with:
           return;
         }
 
-        if (msg.id === "btnNetworkUploadBlob"){
-          try{
-            const blob = await readStoredBlob();
-            if (!blob) throw new Error("No local Vortex OS blob exists yet.");
-            await nodeFetch("/api/profile/blob", {
-              method: "PUT",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(blob)
-            });
-            alert("Encrypted OS blob uploaded to the node.");
-          } catch (err){
-            alert(err && err.message ? err.message : "Unable to upload the encrypted OS blob.");
-          }
-          return;
-        }
-        
-        if (msg.id === "btnNetworkDownloadBlob"){
-          try{
-            const res = await nodeFetch("/api/profile/blob");
-            const blob = await res.json();
-            await writeStoredBlob(blob);
-            alert("Encrypted OS blob downloaded from the node. Reloading now.");
-            location.reload();
-          } catch (err){
-            alert(err && err.message ? err.message : "Unable to download the encrypted OS blob.");
-          }
-          return;
-        }
-        
         if (msg.id === "btnNodeUpdate"){
           try{
             const res = await nodeFetch("/api/node/update", { method: "POST" });
@@ -6946,7 +7013,7 @@ with:
           }
           return;
         }
-        
+
         if (msg.id === "btnNodeReset"){
           const ok = confirm("Reset backend node state? This clears trusted devices, synced blobs, browser sessions, and runtime state.");
           if (!ok) return;
@@ -6962,30 +7029,37 @@ with:
           }
           return;
         }
-        
+
+        if (msg.id === "btnDeviceSignOut"){
+          const ok = confirm("Sign out on this device and return to the node sign-in screen?");
+          if (!ok) return;
+          await disconnectVortexNetwork();
+          return;
+        }
+
         if (msg.type === "vortex.browser.ready"){
           const windowId = windowIdFromSource(event.source, "vortex-browser") || "vortex-browser";
           syncBrowserIframe(windowId);
           return;
         }
-        
+
         if (msg.type === "vortex.browser.action"){
           const windowId = windowIdFromSource(event.source, "vortex-browser") || "vortex-browser";
           try{
             if (msg.action === "navigate"){
               const raw = String(msg.input || "").trim();
               if (!raw) return;
-        
+
               const looksLikeUrl =
                 /^https?:\/\//i.test(raw) ||
                 /^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(raw);
-        
+
               const target = looksLikeUrl
                 ? (/^https?:\/\//i.test(raw) ? raw : `https://${raw}`)
                 : buildSearchUrl(raw, decryptedConfig?.os?.searchEngine || "duckduckgo", false);
-        
+
               if (!target) return;
-        
+
               const state = browserWindowState(windowId);
               if (state.sessionId){
                 await browserSessionAction("navigate", { url: target }, windowId);
@@ -7016,7 +7090,87 @@ with:
           }
           return;
         }
-        
+
+        if (msg.type === "vortex.files.ready"){
+          const windowId = windowIdFromSource(event.source, "vortex-files") || "vortex-files";
+          try{
+            const state = fileWindowState(windowId);
+            if (!state.currentPath){
+              await listRemoteFiles(getNetworkCfg().nodeSettings.filesHomePath || "~", windowId);
+            } else {
+              syncFilesIframe(windowId);
+            }
+          } catch (err){
+            alert(err && err.message ? err.message : "Unable to open the file browser.");
+          }
+          return;
+        }
+
+        if (msg.type === "vortex.files.action"){
+          const windowId = windowIdFromSource(event.source, "vortex-files") || "vortex-files";
+          try{
+            if (msg.action === "go"){
+              await listRemoteFiles(String(msg.path || "").trim() || "~", windowId);
+            } else if (msg.action === "refresh"){
+              await listRemoteFiles(fileWindowState(windowId).currentPath || getNetworkCfg().nodeSettings.filesHomePath || "~", windowId);
+            } else if (msg.action === "up"){
+              await listRemoteFiles(String(msg.path || "/"), windowId);
+            } else if (msg.action === "open"){
+              const entry = msg.entry || {};
+              if (entry.is_dir){
+                await listRemoteFiles(String(entry.path || ""), windowId);
+              } else {
+                await previewRemoteFile(String(entry.path || ""), windowId);
+              }
+            } else if (msg.action === "select"){
+              const state = fileWindowState(windowId);
+              state.selectedPath = String(msg.path || "");
+              state.selectedEntry = state.entries.find(item => item.path === state.selectedPath) || null;
+              if (state.selectedEntry && !state.selectedEntry.is_dir){
+                await previewRemoteFile(state.selectedPath, windowId);
+              } else {
+                clearFilePreview(windowId);
+                syncFilesIframe(windowId);
+              }
+            } else if (msg.action === "mkdir"){
+              await nodeFetch("/api/files/mkdir", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ path: msg.path })
+              });
+              await listRemoteFiles(fileWindowState(windowId).currentPath, windowId);
+            } else if (msg.action === "rename"){
+              await nodeFetch("/api/files/rename", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ old_path: msg.oldPath, new_path: msg.newPath })
+              });
+              await listRemoteFiles(fileWindowState(windowId).currentPath, windowId);
+            } else if (msg.action === "delete"){
+              await nodeFetch("/api/files/delete", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ path: msg.path, recursive: true })
+              });
+              await listRemoteFiles(fileWindowState(windowId).currentPath, windowId);
+            } else if (msg.action === "download"){
+              await downloadRemoteFile(String(msg.path || ""));
+            } else if (msg.action === "upload"){
+              await nodeFetch("/api/files/write", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ path: msg.path, body_b64: msg.bodyB64 })
+              });
+              await listRemoteFiles(fileWindowState(windowId).currentPath, windowId);
+            } else if (msg.action === "preview"){
+              await previewRemoteFile(String(msg.path || ""), windowId);
+            }
+          } catch (err){
+            alert(err && err.message ? err.message : "File browser request failed.");
+          }
+          return;
+        }
+
         if (msg.type === "vortex.terminal.ready"){
           const windowId = windowIdFromSource(event.source, "vortex-terminal") || "vortex-terminal";
           try{
@@ -7105,6 +7259,11 @@ with:
           return;
         }
 
+        if (msg.type === "vortex.os.togglePin" && msg.appId){
+          await togglePinnedApp(msg.appId);
+          return;
+        }
+
         if (msg.id === "btnEnterFullscreen"){
           try{
             if (!document.fullscreenElement){
@@ -7138,43 +7297,12 @@ with:
             return;
           }
 
-          if (msg.id === "btnExport"){
-            await exportOS();
-            return;
-          }
-
-          if (msg.id === "btnImport"){
-            importOS();
-            return;
-          }
-
-          if (msg.id === "btnResetVault"){
-            const vaultWin = openWindows.get("vortex-vault");
-            if (vaultWin){
-              const f = vaultWin.querySelector("iframe");
-              if (f && f.contentWindow){
-                f.contentWindow.postMessage({ type: "vortex.vault.resetToStock" }, "*");
-              }
-            }
-            return;
-          }
-
           if (msg.id === "btnAddApp"){
             openAddAppModal();
             return;
           }
         }
 
-        if (msg.id === "btnFactoryResetOS"){
-          const ok = confirm("This deletes your local encrypted vortex.os profile from this browser and restarts VortexOS. Continue?");
-          if (!ok) return;
-
-          try { await disconnectVortexNetwork(); } catch {}
-          await clearStoredBlob();
-          location.reload();
-          return;
-        }
-        
         if (msg.type === "vortex.os.editApp" && msg.appId){
           openEditAppModal(msg.appId);
           return;
@@ -7224,7 +7352,7 @@ with:
 
         const topHint = document.createElement("div");
         topHint.className = "hint";
-        topHint.innerHTML = 'Hosted website = opens a URL. Custom HTML app = stored directly inside your encrypted VortexOS file. Prefix a hosted website URL with <code>vortexnet:</code> to force it through your connected Vortex Network node.';
+        topHint.innerHTML = 'Hosted website = opens a URL. Custom HTML app = stored directly on your synced Vortex Node profile. Prefix a hosted website URL with <code>vortexnet:</code> to force it through your connected Vortex Network node.';
 
         const err = document.createElement("div");
         err.className = "error";
@@ -7951,21 +8079,53 @@ with:
           st.addEventListener("keydown", (e)=>{ if (e.key === "Enter") openApp("clock"); });
         }
 
-        el("btnSetupNew").addEventListener("click", ()=> setScreen("setup"));
-        el("btnSetupRestore").addEventListener("click", ()=> importOS());
+        async function connectFromWelcome(){
+          setNodeOnboardingMessage("welcomeErr", "");
 
-        el("btnReturnImport").addEventListener("click", ()=> importOS());
-        el("btnReturnUnlock").addEventListener("click", unlockReturning);
+          const nodeUrl = (el("nodeUrlInput")?.value || "").trim();
+          const username = (el("nodeUserInput")?.value || "").trim();
+          const password = (el("nodePasswordInput")?.value || "");
+          const otp = (el("nodeOtpInput")?.value || "").trim();
 
-        el("btnCreateOS").addEventListener("click", createNewOS);
+          if (!nodeUrl || !username || !password){
+            setNodeOnboardingMessage("welcomeErr", "Node URL, username, and password are required.");
+            return;
+          }
 
-        el("btnUnlock").addEventListener("click", unlockImported);
+          setScreen("return");
+          setNodeOnboardingMessage("returnErr", "Signing in and syncing your cloud desktop…", false);
 
-        const btnSetupRestoreNode = el("btnSetupRestoreNode");
-        const btnReturnRestoreNode = el("btnReturnRestoreNode");
-        if (btnSetupRestoreNode) btnSetupRestoreNode.addEventListener("click", ()=> openNodeRestoreModal());
-        if (btnReturnRestoreNode) btnReturnRestoreNode.addEventListener("click", ()=> openNodeRestoreModal());
-        
+          try{
+            await loginToVortexNetwork(nodeUrl, username, password, otp);
+            await loadRemoteProfileFromNode();
+            await bootIntoOS("Connected", "Syncing your cloud desktop…");
+          } catch (err){
+            setScreen("welcome");
+            setNodeOnboardingMessage("welcomeErr", err && err.message ? err.message : "Unable to sign in to Vortex Node.");
+            primeNodeOnboarding();
+          }
+        }
+
+        async function reconnectSavedSession(){
+          setNodeOnboardingMessage("returnErr", "Reconnecting to your saved node session…", false);
+          try{
+            if (getNetworkCfg().pairingToken){
+              await refreshAccessViaPairing();
+            } else {
+              await refreshVortexNetworkStatus();
+            }
+            await loadRemoteProfileFromNode();
+            await bootIntoOS("Welcome back", "Syncing your cloud desktop…");
+          } catch (err){
+            clearNodeSessionCache();
+            const n = getNetworkCfg();
+            Object.assign(n, networkDefaults(), { nodeUrl: detectDefaultNodeUrl() || "", status: "offline" });
+            setScreen("welcome");
+            setNodeOnboardingMessage("welcomeErr", err && err.message ? err.message : "Saved node session expired. Sign in again.");
+            primeNodeOnboarding();
+          }
+        }
+
         function bindEnterSubmit(inputId, buttonId){
           const inp = el(inputId);
           const btn = el(buttonId);
@@ -7978,12 +8138,29 @@ with:
           });
         }
 
-        bindEnterSubmit("returnPw", "btnReturnUnlock");
-        bindEnterSubmit("unlockPw", "btnUnlock");
-        bindEnterSubmit("setupPw", "btnCreateOS");
-        bindEnterSubmit("setupPw2", "btnCreateOS");
+        el("btnNodeSignIn")?.addEventListener("click", connectFromWelcome);
+        el("btnUseSavedSession")?.addEventListener("click", reconnectSavedSession);
+        el("btnReconnectSaved")?.addEventListener("click", reconnectSavedSession);
 
-        bindEnterSubmit("setupDisplayName", "btnCreateOS");
+        el("btnForgetSavedSession")?.addEventListener("click", ()=>{
+          clearNodeSessionCache();
+          const n = getNetworkCfg();
+          Object.assign(n, networkDefaults(), { nodeUrl: detectDefaultNodeUrl() || "", status: "offline" });
+          setNodeOnboardingMessage("returnErr", "");
+          setScreen("welcome");
+          primeNodeOnboarding();
+        });
+
+        el("btnSwitchNode")?.addEventListener("click", ()=>{
+          setNodeOnboardingMessage("returnErr", "");
+          setScreen("welcome");
+          primeNodeOnboarding();
+        });
+
+        bindEnterSubmit("nodeUrlInput", "btnNodeSignIn");
+        bindEnterSubmit("nodeUserInput", "btnNodeSignIn");
+        bindEnterSubmit("nodePasswordInput", "btnNodeSignIn");
+        bindEnterSubmit("nodeOtpInput", "btnNodeSignIn");
         
         const btnSetupPfpUpload = el("btnSetupPfpUpload");
         const btnSetupPfpClear = el("btnSetupPfpClear");
@@ -8125,6 +8302,17 @@ with:
         });
         el("btnCloseGrid").addEventListener("click", hideGrid);
 
+        const appDrawerSearch = el("appDrawerSearch");
+        if (appDrawerSearch){
+          appDrawerSearch.addEventListener("input", rebuildDock);
+          appDrawerSearch.addEventListener("keydown", (e)=>{
+            if (e.key === "Escape"){
+              e.preventDefault();
+              hideGrid();
+            }
+          });
+        }
+        
         el("btnModalClose").addEventListener("click", closeModal);
         modal.addEventListener("click", (e)=>{ if (e.target === modal) closeModal(); });
 
@@ -8289,43 +8477,9 @@ with:
         }
 
         setBodyMode();
-
-        if (pendingNodeBootstrap){
-          const n = getNetworkCfg();
-          n.enabled = true;
-          n.nodeUrl = pendingNodeBootstrap.nodeUrl;
-          n.username = pendingNodeBootstrap.username;
-          n.accessToken = pendingNodeBootstrap.accessToken;
-          n.pairingToken = pendingNodeBootstrap.pairingToken;
-          n.deviceId = pendingNodeBootstrap.deviceId;
-          n.status = "connected";
-          n.lastConnectedAt = Date.now();
-          pendingNodeBootstrap = null;
-          await persistConfig();
-        }
-        
-        const net = getNetworkCfg();
-        if (net.enabled && net.nodeUrl && (net.pairingToken || net.accessToken)){
-          try{
-            if (net.pairingToken){
-              await refreshAccessViaPairing();
-            } else {
-              await refreshVortexNetworkStatus();
-            }
-          } catch (err){
-            net.status = "auth-expired";
-            net.accessToken = "";
-            await persistConfig();
-          }
-        }
-
-        if (promptNodeOnboardingAfterBoot){
-          promptNodeOnboardingAfterBoot = false;
-          if (!net.nodeUrl){
-            pendingSettingsTab = "network";
-            openApp("settings");
-          }
-        }
+        syncSettingsIframe();
+        syncBrowserIframe("vortex-browser");
+        syncFilesIframe("vortex-files");
 
         setBoot(false);
         setScreen("os");
@@ -8337,14 +8491,46 @@ with:
           return;
         }
 
+        decryptedConfig = defaultConfig();
+        currentPassword = "__node_managed__";
+
         wireUI();
 
-        const blob = await readStoredBlob();
-        if (!blob){
-          setScreen("welcome");
+        const cached = loadNodeSessionCache();
+        const net = getNetworkCfg();
+
+        if (cached && typeof cached === "object"){
+          Object.assign(net, networkDefaults(), net, cached);
+          net.nodeSettings = Object.assign(networkDefaults().nodeSettings, cached.nodeSettings || {});
         } else {
-          setScreen("return");
+          const defaultNodeUrl = detectDefaultNodeUrl();
+          if (defaultNodeUrl) net.nodeUrl = defaultNodeUrl;
         }
+
+        primeNodeOnboarding();
+
+        if (net.nodeUrl && (net.pairingToken || net.accessToken)){
+          setScreen("return");
+          setNodeOnboardingMessage("returnErr", "Reconnecting to your saved node session…", false);
+
+          try{
+            if (net.pairingToken){
+              await refreshAccessViaPairing();
+            } else {
+              await refreshVortexNetworkStatus();
+            }
+            await loadRemoteProfileFromNode();
+            await bootIntoOS("Welcome back", "Syncing your cloud desktop…");
+            return;
+          } catch (err){
+            clearNodeSessionCache();
+            Object.assign(net, networkDefaults(), { nodeUrl: detectDefaultNodeUrl() || "", status: "offline" });
+            primeNodeOnboarding();
+            setNodeOnboardingMessage("welcomeErr", err && err.message ? err.message : "Saved node session expired. Sign in again.");
+          }
+        }
+
+        setScreen("welcome");
       }
 
       init();
