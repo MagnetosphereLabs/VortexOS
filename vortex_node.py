@@ -169,28 +169,16 @@ DEFAULT_REMOTE_STUN_SERVERS = ["stun:stun.l.google.com:19302"]
 
 TERMINAL_VENDOR_ASSETS = {
     "xterm.css": {
-        "cache_key": "vendor_xterm-5.5.0.tgz",
-        "urls": [
-            "https://registry.npmjs.org/xterm/-/xterm-5.5.0.tgz",
-            github_raw_url(DEFAULT_UPDATE_OWNER, DEFAULT_UPDATE_REPO, DEFAULT_UPDATE_BRANCH, "vendor_xterm-5.5.0.tgz"),
-        ],
+        "repo_file": "vendor_xterm-5.5.0.tgz",
         "member": "package/css/xterm.css",
     },
     "xterm.js": {
-        "cache_key": "vendor_xterm-5.5.0.tgz",
-        "urls": [
-            "https://registry.npmjs.org/xterm/-/xterm-5.5.0.tgz",
-            github_raw_url(DEFAULT_UPDATE_OWNER, DEFAULT_UPDATE_REPO, DEFAULT_UPDATE_BRANCH, "vendor_xterm-5.5.0.tgz"),
-        ],
+        "repo_file": "vendor_xterm-5.5.0.tgz",
         "member": "package/lib/xterm.js",
     },
     "xterm-addon-fit.js": {
-        "cache_key": "vendor_xterm-addon-fit-0.10.0.tgz",
-        "urls": [
-            "https://registry.npmjs.org/xterm-addon-fit/-/xterm-addon-fit-0.10.0.tgz",
-            github_raw_url(DEFAULT_UPDATE_OWNER, DEFAULT_UPDATE_REPO, DEFAULT_UPDATE_BRANCH, "vendor_xterm-addon-fit-0.10.0.tgz"),
-        ],
-        "member": "package/lib/xterm-addon-fit.js",
+        "repo_file": "vendor_xterm-addon-fit-0.10.0.tgz",
+        "member": "package/lib/addon-fit.js",
     },
 }
 
@@ -626,13 +614,13 @@ def ensure_playwright_browser() -> None:
         run_command([sys.executable, "-m", "playwright", "install-deps", "chromium"], check=True)
 
 
-def bootstrap_runtime() -> None:
+def bootstrap_runtime(cfg_raw: dict[str, t.Any] | None = None) -> None:
     ensure_dirs()
     ensure_system_packages()
     if ensure_python_packages():
         restart_current_process("Python dependencies installed. Restarting Vortex Node...")
     ensure_playwright_browser()
-    ensure_terminal_vendor_assets()
+    ensure_terminal_vendor_assets(cfg_raw=cfg_raw)
 
 
 def current_frontend_path(cfg_raw: dict[str, t.Any] | None = None) -> pathlib.Path:
@@ -663,8 +651,47 @@ def _download_first_available_bytes(urls: list[str]) -> tuple[bytes, str]:
         "Unable to download vendor asset from any source:\n" + "\n".join(errors)
     )
 
-def ensure_terminal_vendor_assets(force: bool = False) -> None:
+def github_raw_url(owner: str, repo: str, branch: str, remote_path: str) -> str:
+    return (
+        f"https://raw.githubusercontent.com/"
+        f"{urllib.parse.quote(owner, safe='')}/"
+        f"{urllib.parse.quote(repo, safe='')}/"
+        f"{urllib.parse.quote(branch, safe='')}/"
+        f"{urllib.parse.quote(remote_path, safe='/')}"
+    )
+
+
+def configured_update_refs(cfg_raw: dict[str, t.Any] | None = None) -> tuple[str, str, str]:
+    cfg_raw = migrate_config(cfg_raw or {})
+    updates = cfg_raw.get("updates") or {}
+
+    owner = str(
+        updates.get("owner")
+        or os.environ.get("REPO_OWNER")
+        or DEFAULT_UPDATE_OWNER
+    ).strip() or DEFAULT_UPDATE_OWNER
+
+    repo = str(
+        updates.get("repo")
+        or os.environ.get("REPO_NAME")
+        or DEFAULT_UPDATE_REPO
+    ).strip() or DEFAULT_UPDATE_REPO
+
+    branch = str(
+        updates.get("branch")
+        or os.environ.get("REPO_BRANCH")
+        or DEFAULT_UPDATE_BRANCH
+    ).strip() or DEFAULT_UPDATE_BRANCH
+
+    return owner, repo, branch
+
+def ensure_terminal_vendor_assets(
+    force: bool = False,
+    cfg_raw: dict[str, t.Any] | None = None,
+) -> None:
     ensure_dirs()
+
+    owner, repo, branch = configured_update_refs(cfg_raw)
     tarball_cache: dict[str, bytes] = {}
 
     for filename, spec in TERMINAL_VENDOR_ASSETS.items():
@@ -672,20 +699,34 @@ def ensure_terminal_vendor_assets(force: bool = False) -> None:
         if dest.exists() and dest.stat().st_size > 0 and not force:
             continue
 
-        cache_key = str(spec.get("cache_key") or filename)
-        tarball_bytes = tarball_cache.get(cache_key)
+        repo_file = str(spec["repo_file"])
+        tarball_url = github_raw_url(owner, repo, branch, repo_file)
+
+        tarball_bytes = tarball_cache.get(repo_file)
         if tarball_bytes is None:
-            urls = list(spec.get("urls") or ([spec["url"]] if spec.get("url") else []))
-            if not urls:
-                raise RuntimeError(f"No download URLs configured for terminal vendor asset {filename}")
-            tarball_bytes, source_url = _download_first_available_bytes(urls)
-            print(f"Fetched terminal vendor asset for {filename} from {source_url}")
-            tarball_cache[cache_key] = tarball_bytes
+            tarball_bytes = _download_url_bytes(tarball_url)
+            tarball_cache[repo_file] = tarball_bytes
+            print(f"Fetched terminal vendor asset for {filename} from {tarball_url}")
 
         with tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode="r:gz") as tar:
-            member = tar.extractfile(spec["member"])
+            try:
+                member = tar.extractfile(spec["member"])
+            except KeyError as exc:
+                available = ", ".join(
+                    m.name for m in tar.getmembers()[:40]
+                )
+                raise RuntimeError(
+                    f"Unable to locate vendor asset {spec['member']} in {repo_file} "
+                    f"from repo {owner}/{repo}@{branch}. "
+                    f"Available archive entries include: {available}"
+                ) from exc
+
             if member is None:
-                raise RuntimeError(f"Unable to locate vendor asset {spec['member']} in cache bundle {cache_key}")
+                raise RuntimeError(
+                    f"Unable to open vendor asset {spec['member']} in {repo_file} "
+                    f"from repo {owner}/{repo}@{branch}"
+                )
+
             content = member.read()
 
         tmp = dest.with_suffix(dest.suffix + ".tmp")
@@ -1871,11 +1912,29 @@ def ask_install_config() -> dict[str, t.Any]:
     run_on_boot = prompt_yes_no("Install a systemd service (Linux only, requires sudo)?", default=True)
     use_tmux = prompt_yes_no("Use tmux helpers for foreground/background management?", default=True)
 
+    update_repo_mode = prompt_choice(
+        "Which GitHub repo should Vortex use for updates and bundled terminal assets?",
+        [
+            ("official", f"Official repo ({DEFAULT_UPDATE_OWNER}/{DEFAULT_UPDATE_REPO}:{DEFAULT_UPDATE_BRANCH})"),
+            ("custom", "Custom owner/repo/branch"),
+        ],
+        default_key="official",
+    )
+    
+    update_owner = DEFAULT_UPDATE_OWNER
+    update_repo = DEFAULT_UPDATE_REPO
+    update_branch = DEFAULT_UPDATE_BRANCH
+    
+    if update_repo_mode == "custom":
+        update_owner = prompt("GitHub owner", default=DEFAULT_UPDATE_OWNER).strip() or DEFAULT_UPDATE_OWNER
+        update_repo = prompt("GitHub repo", default=DEFAULT_UPDATE_REPO).strip() or DEFAULT_UPDATE_REPO
+        update_branch = prompt("GitHub branch", default=DEFAULT_UPDATE_BRANCH).strip() or DEFAULT_UPDATE_BRANCH
+    
     updates_cfg = {
         "enabled": prompt_yes_no("Check GitHub for backend/frontend updates on startup?", default=True),
-        "owner": DEFAULT_UPDATE_OWNER,
-        "repo": DEFAULT_UPDATE_REPO,
-        "branch": DEFAULT_UPDATE_BRANCH,
+        "owner": update_owner,
+        "repo": update_repo,
+        "branch": update_branch,
         "backend_path": DEFAULT_REMOTE_BACKEND_PATH,
         "frontend_path": DEFAULT_REMOTE_FRONTEND_PATH,
     }
@@ -4729,7 +4788,8 @@ def doctor() -> int:
 
 
 def install_flow() -> int:
-    bootstrap_runtime()
+    existing_cfg = migrate_config(read_json(CONFIG_PATH, {})) if CONFIG_PATH.exists() else {}
+    bootstrap_runtime(existing_cfg)
     cfg = ask_install_config()
     print(f"\nSaved config to {CONFIG_PATH}\n")
 
@@ -4764,7 +4824,7 @@ def install_flow() -> int:
 def run_server() -> int:
     cfg_raw = migrate_config(read_json(CONFIG_PATH, {})) if CONFIG_PATH.exists() else {}
     apply_startup_updates(cfg_raw, restart_after_backend_update=True)
-    bootstrap_runtime()
+    bootstrap_runtime(cfg_raw)
 
     if not CONFIG_PATH.exists():
         print(f"Missing config: {CONFIG_PATH}. Run: python vortex_network.py install")
