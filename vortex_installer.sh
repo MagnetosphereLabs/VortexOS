@@ -5,6 +5,10 @@ REPO_OWNER="${REPO_OWNER:-MagnetosphereLabs}"
 REPO_NAME="${REPO_NAME:-VortexOS}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
+export REPO_OWNER
+export REPO_NAME
+export REPO_BRANCH
+
 INSTALL_DIR="${INSTALL_DIR:-/opt/vortex-node}"
 VENV_DIR="${INSTALL_DIR}/.venv"
 
