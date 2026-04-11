@@ -4965,8 +4965,6 @@ User=root
 Group=root
 Environment=PYTHONUNBUFFERED=1
 NoNewPrivileges=false
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
 
 [Install]
 WantedBy=multi-user.target
