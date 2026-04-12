@@ -2456,24 +2456,20 @@
   <title>Terminal</title>
   <style>
     html,body{height:100%;margin:0;background:#050714;color:#f7fbff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:hidden;}
-    .wrap{height:100%;display:flex;flex-direction:column;padding:10px;gap:10px;box-sizing:border-box;}
-    .bar{display:flex;align-items:center;justify-content:space-between;gap:10px;}
-    .status{min-width:0;flex:1;padding:10px 12px;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);font-size:12px;color:rgba(200,220,255,0.82);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .btn{border:none;border-radius:999px;padding:10px 14px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.10);color:#f7fbff;cursor:pointer;font-weight:700;}
-    #termHost{flex:1;min-height:0;border-radius:14px;padding:10px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.08);overflow:hidden;position:relative;}
-    #termBootMsg{position:absolute;inset:0;display:grid;place-items:center;padding:18px;text-align:center;font-size:12px;color:rgba(200,220,255,0.82);}
+    .wrap{height:100%;display:flex;flex-direction:column;padding:0;gap:0;box-sizing:border-box;background:#000;}
+    .bar{display:none !important;}
+    .status{display:none !important;}
+    .btn{display:none !important;}
+    #termHost{flex:1;min-height:0;border-radius:0;padding:0;background:#000;border:none;overflow:hidden;position:relative;}
+    #termBootMsg{position:absolute;inset:0;display:grid;place-items:center;padding:18px;text-align:center;font-size:12px;color:rgba(200,220,255,0.82);background:#000;}
     .xterm-viewport::-webkit-scrollbar{width:8px;height:8px;}
     .xterm-viewport::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.18);border-radius:999px;}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="bar">
-      <div id="termStatus" class="status">Waiting for Vortex Node terminal…</div>
-      <button id="termReconnect" class="btn" type="button">Reconnect</button>
-    </div>
     <div id="termHost">
-      <div id="termBootMsg">Waiting for Vortex Node terminal…</div>
+      <div id="termBootMsg">Connecting to terminal…</div>
     </div>
   </div>
 
@@ -3355,84 +3351,95 @@
 <body>
   <div class="shell">
     <div class="toolbar">
-      <div id="editorPath" class="path">No file open</div>
-      <button id="editorSave" class="btn primary" type="button">Save</button>
+      <div id="editorPath" class="path">Unsaved text file</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="editorNew" class="btn" type="button" title="New file">+</button>
+        <button id="editorSave" class="btn primary" type="button" title="Save">Save</button>
+      </div>
     </div>
-
-    <div id="editorStatus" class="status">Connect Vortex Node to edit files.</div>
-    <textarea id="editorArea" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+  
+    <textarea
+      id="editorArea"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      placeholder="Start typing..."></textarea>
   </div>
-
+  
   <script>
     (function(){
       const pathEl = document.getElementById("editorPath");
-      const statusEl = document.getElementById("editorStatus");
       const area = document.getElementById("editorArea");
       const saveBtn = document.getElementById("editorSave");
-
+      const newBtn = document.getElementById("editorNew");
+  
       let state = {
         connected: false,
         path: "",
         name: "Untitled.txt",
         text: "",
         dirty: false,
-        saving: false
+        saving: false,
+        isNew: true
       };
-
+  
       let suppressChange = false;
-
+  
       function render(){
-        pathEl.textContent = state.path || "No file open";
-        statusEl.textContent = state.saving
-          ? "Saving…"
-          : (state.connected
-              ? `${state.name || "Text file"}${state.dirty ? " • unsaved changes" : ""}`
-              : "Connect Vortex Node to edit files.");
-        area.disabled = !state.connected || !state.path;
-        saveBtn.disabled = !state.connected || !state.path || state.saving || !state.dirty;
+        pathEl.textContent = state.path || "Unsaved text file";
+        area.disabled = !state.connected;
+        area.placeholder = state.connected ? "Start typing..." : "Connect Vortex Node to edit files.";
+        saveBtn.disabled = !state.connected || state.saving || (!state.dirty && !state.isNew);
+        newBtn.disabled = !state.connected;
+        saveBtn.textContent = state.saving ? "Saving…" : "Save";
       }
-
+  
       function sendSave(){
-        if (!state.connected || !state.path || state.saving) return;
+        if (!state.connected || state.saving) return;
         parent.postMessage({
           type: "vortex.text-editor.save",
-          path: state.path,
+          path: state.path || "",
+          name: state.name || "Untitled.txt",
           text: area.value
         }, "*");
       }
-
+  
       area.addEventListener("input", ()=>{
         if (suppressChange) return;
         state.text = area.value;
         state.dirty = true;
         render();
       });
-
+  
       saveBtn.addEventListener("click", sendSave);
-
+  
+      newBtn.addEventListener("click", ()=>{
+        parent.postMessage({ type: "vortex.text-editor.new" }, "*");
+      });
+  
       window.addEventListener("keydown", (e)=>{
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s"){
           e.preventDefault();
           sendSave();
         }
       });
-
+  
       window.addEventListener("message", (e)=>{
         const msg = e.data;
         if (!msg || typeof msg !== "object") return;
-
+  
         if (msg.type === "vortex.text-editor.state"){
           const incoming = msg.state || {};
           state = Object.assign({}, state, incoming);
-
+  
           suppressChange = true;
           area.value = String(state.text || "");
           suppressChange = false;
-
+  
           render();
         }
       });
-
+  
       window.addEventListener("DOMContentLoaded", ()=>{
         parent.postMessage({ type: "vortex.text-editor.ready" }, "*");
       });
@@ -4950,26 +4957,22 @@ Replace with:
             text: "",
             connected: false,
             dirty: false,
-            saving: false
+            saving: false,
+            isNew: true
           };
         }
         return textEditorStates[windowId];
       }
-
-      function isEditableTextEntry(entry){
-        const mime = String(entry?.mime_type || "");
-        const name = String(entry?.name || "");
-        return mime.startsWith("text/")
-          || /\.(txt|md|py|json|js|ts|html|css|sh|yaml|yml|xml|log|ini|conf|toml|env)$/i.test(name);
-      }
-
+      
       function syncTextEditorIframe(windowId){
         const win = openWindows.get(windowId);
         if (!win) return;
-
+      
         const frame = win.querySelector("iframe");
         const state = textEditorWindowState(windowId);
-
+        const titleEl = win.querySelector(".winTitle");
+        if (titleEl) titleEl.textContent = state.name || "Untitled.txt";
+      
         frame?.contentWindow?.postMessage({
           type: "vortex.text-editor.state",
           state: {
@@ -4978,25 +4981,45 @@ Replace with:
             name: state.name || "Untitled.txt",
             text: state.text || "",
             dirty: !!state.dirty,
-            saving: !!state.saving
+            saving: !!state.saving,
+            isNew: !!state.isNew
           }
         }, "*");
       }
-
+      
+      function openBlankTextFileInEditor(){
+        const windowId = openAppWindow("vortex-text-editor", undefined, {
+          forceNew: true,
+          title: "Untitled.txt"
+        });
+      
+        const editorState = textEditorWindowState(windowId);
+        editorState.path = "";
+        editorState.name = "Untitled.txt";
+        editorState.text = "";
+        editorState.connected = networkConnected();
+        editorState.dirty = false;
+        editorState.saving = false;
+        editorState.isNew = true;
+      
+        syncTextEditorIframe(windowId);
+        return windowId;
+      }
+      
       async function openRemoteTextFileInEditor(path, sourceWindowId = "vortex-files"){
         if (!networkConnected()) throw new Error("Connect Vortex Node first.");
-
+      
         const sourceState = fileWindowState(sourceWindowId);
         const entry = sourceState.entries.find(item => item.path === path) || null;
-
+      
         const res = await nodeFetch(`/api/files/text?path=${encodeURIComponent(path)}`);
         const data = await res.json();
-
+      
         const windowId = openAppWindow("vortex-text-editor", undefined, {
           forceNew: true,
           title: data.name || entry?.name || (String(path).split("/").pop() || "Text Editor")
         });
-
+      
         const editorState = textEditorWindowState(windowId);
         editorState.path = data.path || path;
         editorState.name = data.name || entry?.name || "Untitled.txt";
@@ -5004,7 +5027,8 @@ Replace with:
         editorState.connected = true;
         editorState.dirty = false;
         editorState.saving = false;
-
+        editorState.isNew = false;
+      
         syncTextEditorIframe(windowId);
       }
     
@@ -5944,11 +5968,10 @@ Replace with:
       }
 
       function sandboxForApp(app){
-        // Default: isolate. Apps communicate via postMessage.
-        // "trusted" allows same-origin capabilities (storage/cookies/etc) for the iframe content.
+        // Built-in Vortex apps use prompt()/confirm() for some flows, so modals must be allowed.
         const mode = (app && app.sandboxMode) ? app.sandboxMode : "strict";
-        if (mode === "trusted") return "allow-scripts allow-forms allow-same-origin";
-        return "allow-scripts allow-forms";
+        if (mode === "trusted") return "allow-scripts allow-forms allow-same-origin allow-modals";
+        return "allow-scripts allow-forms allow-modals";
       }
 
 
@@ -6210,6 +6233,7 @@ Replace with:
           openWindows.delete(appId);
           setIconActive(baseAppId, hasOpenWindowForApp(baseAppId));
           if (focusedAppId === appId) focusedAppId = null;
+          rebuildDock();
         }, WIN_ANIM_MS);
       }
 
@@ -6450,6 +6474,7 @@ Replace with:
           if (existing.classList.contains("minimized")) restoreWindow(finalWindowId);
           else { bringToFront(existing); focusApp(finalWindowId); }
           setIconActive(baseAppId, true);
+          rebuildDock();
           return finalWindowId;
         }
 
@@ -6461,8 +6486,9 @@ Replace with:
 
         focusApp(finalWindowId);
         setIconActive(baseAppId, true);
+        rebuildDock();
         if (baseAppId === "settings") setTimeout(syncSettingsIframe, 60);
-
+        
         return finalWindowId;
       }
 
@@ -6556,6 +6582,29 @@ Replace with:
         iconEl.addEventListener("click", onClick);
         return iconEl;
       }
+
+      function firstOpenWindowIdForApp(baseAppId){
+        for (const [windowId] of openWindows.entries()){
+          if (baseAppIdFromWindowId(windowId) === baseAppId) return windowId;
+        }
+        return "";
+      }
+      
+      function activateOrOpenApp(appId){
+        const existingId = firstOpenWindowIdForApp(appId);
+        if (existingId){
+          const win = openWindows.get(existingId);
+          if (win){
+            if (win.classList.contains("minimized")) restoreWindow(existingId);
+            else {
+              bringToFront(win);
+              focusApp(existingId);
+            }
+            return existingId;
+          }
+        }
+        return openApp(appId);
+      }
       
       function rebuildDock(){
         dockCenter.innerHTML = "";
@@ -6583,7 +6632,18 @@ Replace with:
 
         const pinnedIds = normalizedPinnedApps();
         const pinnedSet = new Set(pinnedIds);
-
+        
+        const runningIds = [];
+        for (const [windowId] of openWindows.entries()){
+          const baseId = baseAppIdFromWindowId(windowId);
+          if (!runningIds.includes(baseId)) runningIds.push(baseId);
+        }
+        
+        const dockIds = [...pinnedIds];
+        for (const appId of runningIds){
+          if (!dockIds.includes(appId)) dockIds.push(appId);
+        }
+        
         const launcher = document.createElement("div");
         launcher.className = "appIcon launcher" + (gridVisible ? " active" : "");
         launcher.title = "All apps";
@@ -6592,25 +6652,25 @@ Replace with:
           if (gridVisible) hideGrid(); else showGrid();
         });
         dockCenter.appendChild(launcher);
-
-        for (const appId of pinnedIds){
+        
+        for (const appId of dockIds){
           const app = allApps.find(x => x.id === appId);
           if (!app) continue;
-
-          const iconEl = makeDockAppIcon(app, ()=> openApp(app.id));
+        
+          const iconEl = makeDockAppIcon(app, ()=> activateOrOpenApp(app.id));
           if (hasOpenWindowForApp(app.id)) iconEl.classList.add("active");
           if (focusedAppId && baseAppIdFromWindowId(focusedAppId) === app.id) iconEl.classList.add("focused");
           dockCenter.appendChild(iconEl);
-
+        
           const mobileEl = makeDockAppIcon(app, ()=>{
             hideGrid();
-            openApp(app.id);
+            activateOrOpenApp(app.id);
           });
           if (hasOpenWindowForApp(app.id)) mobileEl.classList.add("active");
           if (focusedAppId && baseAppIdFromWindowId(focusedAppId) === app.id) mobileEl.classList.add("focused");
           mobileIcons.appendChild(mobileEl);
-
-          if (pinnedWrap){
+        
+          if (pinnedWrap && pinnedSet.has(app.id)){
             const chip = document.createElement("div");
             chip.className = "pill";
             chip.textContent = app.name;
@@ -7521,32 +7581,63 @@ Replace with:
           syncTextEditorIframe(windowId);
           return;
         }
-
+        
+        if (msg.type === "vortex.text-editor.new"){
+          openBlankTextFileInEditor();
+          return;
+        }
+        
         if (msg.type === "vortex.text-editor.save"){
           const windowId = windowIdFromSource(event.source, "vortex-text-editor") || "vortex-text-editor";
           const state = textEditorWindowState(windowId);
-
+        
           try{
             state.saving = true;
             syncTextEditorIframe(windowId);
-
+        
             const nextText = String(msg.text ?? state.text ?? "");
-
+            let targetPath = String(msg.path || state.path || "").trim();
+        
+            if (!targetPath){
+              const defaultDir =
+                fileWindowState("vortex-files").currentPath ||
+                getNetworkCfg().nodeSettings.filesHomePath ||
+                "~";
+        
+              const suggested = `${String(defaultDir).replace(/\/+$/, "")}/${state.name || "Untitled.txt"}`;
+              targetPath = window.prompt("Save file as", suggested) || "";
+            }
+        
+            targetPath = String(targetPath || "").trim();
+            if (!targetPath){
+              state.saving = false;
+              syncTextEditorIframe(windowId);
+              return;
+            }
+        
             await nodeFetch("/api/files/write", {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
-                path: state.path,
+                path: targetPath,
                 text: nextText
               })
             });
-
+        
+            state.path = targetPath;
+            state.name = targetPath.split("/").pop() || state.name || "Untitled.txt";
             state.text = nextText;
             state.dirty = false;
+            state.saving = false;
+            state.isNew = false;
+        
+            if (openWindows.has("vortex-files")){
+              await listRemoteFiles(fileWindowState("vortex-files").currentPath || getNetworkCfg().nodeSettings.filesHomePath || "~", "vortex-files");
+            }
           } catch (err){
+            state.saving = false;
             alert(err && err.message ? err.message : "Unable to save the file.");
           } finally {
-            state.saving = false;
             syncTextEditorIframe(windowId);
           }
           return;
