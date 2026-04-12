@@ -1738,10 +1738,10 @@ class TerminalRuntime:
         login_username, home, shell = self._resolve_user(username)
         shell_name = os.path.basename(shell) or "bash"
         shell_argv = [shell, "-il"] if shell_name in {"bash", "zsh", "fish"} else [shell, "-i"]
-
+    
         master_fd, slave_fd = pty.openpty()
         self._set_winsize(slave_fd, rows, cols)
-
+    
         env = os.environ.copy()
         env.setdefault("TERM", "xterm-256color")
         env.setdefault("COLORTERM", "truecolor")
@@ -1752,42 +1752,49 @@ class TerminalRuntime:
         env["LOGNAME"] = login_username
         env["LANG"] = env.get("LANG") or "C.UTF-8"
         env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
-
+    
         try:
             current_username = pwd.getpwuid(os.geteuid()).pw_name
         except Exception:
             current_username = str(os.geteuid())
-
-        if current_username == login_username:
-            cmd = shell_argv
-            proc_cwd = home
-        elif os.geteuid() == 0:
-            if which("runuser") is not None:
-                cmd = ["runuser", "-u", login_username, "--", *shell_argv]
-            elif which("sudo") is not None:
-                cmd = ["sudo", "-n", "-u", login_username, "-H", "--", *shell_argv]
-            else:
-                raise RuntimeError(
-                    f"Cannot launch a terminal as {login_username}: neither sudo nor runuser is available."
-                )
-            proc_cwd = "/"
-        else:
+    
+        target_pw = None
+        try:
+            target_pw = pwd.getpwnam(login_username)
+        except Exception:
+            target_pw = None
+    
+        if current_username != login_username and os.geteuid() != 0:
             raise RuntimeError(
                 f"Vortex Node is running as {current_username}, but the configured Linux account is {login_username}. "
                 "Run the node as that Linux account or run it as root."
             )
-
+    
+        if current_username != login_username and target_pw is None:
+            raise RuntimeError(f"Cannot resolve passwd entry for Linux account {login_username!r}.")
+    
+        def child_setup() -> None:
+            os.setsid()
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+            os.tcsetpgrp(0, os.getpgrp())
+            os.chdir(home)
+    
+            if current_username != login_username and os.geteuid() == 0 and target_pw is not None:
+                os.initgroups(login_username, target_pw.pw_gid)
+                os.setgid(target_pw.pw_gid)
+                os.setuid(target_pw.pw_uid)
+    
         proc = subprocess.Popen(
-            cmd,
+            shell_argv,
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
-            cwd=proc_cwd,
+            cwd=home,
             env=env,
-            start_new_session=True,
+            preexec_fn=child_setup,
             close_fds=True,
         )
-
+    
         os.close(slave_fd)
         flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
@@ -4862,7 +4869,7 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
             pass
         finally:
             pump_task.cancel()
-            with contextlib.suppress(Exception):
+            with contextlib.suppress(asyncio.CancelledError):
                 await pump_task
             with contextlib.suppress(Exception):
                 await websocket.close(code=1000)
