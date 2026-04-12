@@ -3848,18 +3848,26 @@ def create_app(cfg: NodeConfig) -> vvFastAPI:
             return auth.require_embed_ticket(ticket, session_id=session_id)
         except Exception as exc:
             raise HTTPException(401, str(exc)) from exc
-
+    
     @app.get("/", include_in_schema=False)
     async def root() -> Response:
         frontend_cfg = cfg.raw.get("frontend", {})
         ui_path = pathlib.Path(str(frontend_cfg.get("ui_html_path", ""))).expanduser()
+    
+        public_base_url = str(cfg.server.get("public_base_url", "")).strip()
+        parsed_public_base = urllib.parse.urlparse(public_base_url)
+        public_origin = ""
+        if parsed_public_base.scheme in {"http", "https"} and parsed_public_base.netloc:
+            public_origin = f"{parsed_public_base.scheme}://{parsed_public_base.netloc}"
+        frame_src_policy = f"'self' {public_origin}".strip()
+    
         if frontend_cfg.get("serve_ui") and ui_path.exists():
             return FileResponse(
                 ui_path,
                 media_type="text/html",
                 headers={
                     "cache-control": "no-store",
-                    "content-security-policy": f"default-src 'self' 'unsafe-inline' data: blob:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:; frame-ancestors {frame_ancestors_policy};",
+                    "content-security-policy": f"default-src 'self' 'unsafe-inline' data: blob:; frame-src {frame_src_policy}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: https: http:; frame-ancestors {frame_ancestors_policy};",
                     "x-content-type-options": "nosniff",
                     "referrer-policy": "no-referrer",
                 },
