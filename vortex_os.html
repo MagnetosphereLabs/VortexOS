@@ -2498,7 +2498,7 @@
       let sawExit = false;
 
       function setStatus(text){
-        statusEl.textContent = text || "Vortex terminal";
+        if (statusEl) statusEl.textContent = text || "Vortex terminal";
       }
 
       function assetBase(){
@@ -2725,9 +2725,11 @@
         });
       }
 
-      reconnectBtn.addEventListener("click", ()=>{
-        parent.postMessage({ type: "vortex.terminal.reconnect" }, "*");
-      });
+      if (reconnectBtn){
+        reconnectBtn.addEventListener("click", ()=>{
+          parent.postMessage({ type: "vortex.terminal.reconnect" }, "*");
+        });
+      }
 
       window.addEventListener("message", async (e)=>{
         const msg = e.data;
